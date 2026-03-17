@@ -7,7 +7,7 @@ import java.util.Locale
 
 // ジェミちゃんの「声」を担当する専用クラスだよっ🌟
 class JemiVoiceManager(context: Context) : TextToSpeech.OnInitListener {
-    private var tts: TextToSpeech = TextToSpeech(context, this)
+    private var tts: TextToSpeech = TextToSpeech(context.applicationContext, this)
     private var isReady = false
 
     override fun onInit(status: Int) {
@@ -33,6 +33,9 @@ class JemiVoiceManager(context: Context) : TextToSpeech.OnInitListener {
             // 絵文字などの喋れない文字を綺麗にお掃除🧹
             val cleanText = text.replace(Regex("[\\p{So}\\p{Cn}]"), "")
             tts.speak(cleanText, TextToSpeech.QUEUE_FLUSH, null, "JemiVoice")
+        } else {
+            // 準備が間に合わなかった時にログを出力
+            Log.w("JemiVoice", "あわわ、まだ声帯の準備中だよっ💦 (テキスト: $text)")
         }
     }
 

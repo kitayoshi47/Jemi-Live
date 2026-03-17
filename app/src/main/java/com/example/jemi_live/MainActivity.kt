@@ -1,12 +1,7 @@
 package com.example.jemi_live
 
 import android.Manifest
-import android.annotation.SuppressLint
-import android.content.BroadcastReceiver
-import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
-import android.graphics.Bitmap
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Bundle
@@ -22,100 +17,16 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.net.toUri
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
-import androidx.lifecycle.lifecycleScope
-import androidx.localbroadcastmanager.content.LocalBroadcastManager
-import com.google.ai.client.generativeai.GenerativeModel
-import com.google.ai.client.generativeai.type.content
-import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
     private lateinit var jemiVoice: JemiVoiceManager
-
-    // UI部品をキャッシュするための変数
     private lateinit var tvCommentary: TextView
     private lateinit var ivPreview: ImageView
-
-    // メインモードのUI
     private lateinit var rgModes: RadioGroup
     private lateinit var rgPresets: RadioGroup
     private lateinit var btnStartLive: Button
-
-    // MainScope() は削除し、代わりに lifecycleScope を使用します
-
-    private val generativeModel = GenerativeModel(
-        modelName = "gemini-3.1-flash-lite-preview",
-        apiKey = BuildConfig.GEMINI_API_KEY
-    )
-
-    // クラスのプロパティにデバッグモードのスイッチを追加
-    private val isDebugMode = true
-
-    @SuppressLint("SetTextI18n")
-    private suspend fun getJemiCommentary(bitmap: Bitmap) {
-        if (isDebugMode) {
-            // --- 🧪 デバッグ用のダミー処理 ---
-            val dummyResponses = listOf(
-                "わわっ！今のプレイ、めちゃくちゃカッコいいかもっ！🌸",
-                "あちゃー、今の惜しいっ！次、次いこっ！✨",
-                "ヨチオさん、天才じゃない！？今の動き、ジェミも見習いたいな〜🌟",
-                "ふむふむ、ここは慎重に進むのが吉だねっ！大学生の知恵だよっ🎓",
-                "えへへ、画面がキラキラしてて楽しいねっ！応援してるよっ！📣"
-            )
-            val dummyText = dummyResponses.random()
-
-            runOnUiThread {
-                tvCommentary.text = "ジェミちゃん(Debug)：$dummyText"
-                jemiVoice.speak(dummyText)
-            }
-            return // ここで終了して、下のGemini呼び出しは行わない
-        }
-
-        val prompt = "あなたは実況者の『ジェミちゃん』です。このゲーム画面を見て、明るく元気に、23歳の大学生らしい口調で一言実況して！"
-
-        try {
-            // Geminiさんに「画像とプロンプト」を渡す魔法の瞬間っ！
-            val response = generativeModel.generateContent(
-                content {
-                    image(bitmap)
-                    text(prompt)
-                }
-            )
-
-            // 返ってきた言葉を画面に表示するよっ🌸
-            val text = response.text ?: ""
-
-            // runOnUiThreadを使わなくても、lifecycleScope.launch はデフォルトでメインスレッドで動くのでUI操作可能です
-            tvCommentary.text = "ジェミちゃん：$text"
-
-            // 📢 ここで実際に喋るよっ！！
-            jemiVoice.speak(text)
-
-        } catch (e: Exception) {
-            Toast.makeText(this@MainActivity, "あわわ……お喋り失敗しちゃった：${e.message}", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private val imageReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            // インテントから取るんじゃなくて、机から直接拾うっ！
-            val bitmap = ImageStorage.capturedBitmap
-
-            if (bitmap != null) {
-                ivPreview.setImageBitmap(bitmap)
-
-                // 拾ったあとは、机の上（ImageStorage）を片付けてメモリを空けやすくするよっ！
-                ImageStorage.capturedBitmap = null
-
-                // lifecycleScope を使うことで、Activity が閉じたら安全にキャンセルされるようになります
-                lifecycleScope.launch {
-                    getJemiCommentary(bitmap)
-                }
-                Toast.makeText(context, "ジェミちゃんの視界を共有したよっ🌸", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
     private lateinit var mediaProjectionManager: MediaProjectionManager
+
     private val startMediaProjection = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -150,9 +61,6 @@ class MainActivity : AppCompatActivity() {
         // ボイスマネージャー
         jemiVoice = JemiVoiceManager(this)
 
-        LocalBroadcastManager.getInstance(this)
-            .registerReceiver(imageReceiver, IntentFilter("JEMI_IMAGE_CAPTURED"))
-
         mediaProjectionManager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
 
         btnStartLive.setOnClickListener {
@@ -175,9 +83,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        // メモリリークを防ぐため、Receiverの登録を解除するよっ！
-        LocalBroadcastManager.getInstance(this).unregisterReceiver(imageReceiver)
-
         if (::jemiVoice.isInitialized) {
             jemiVoice.shutdown()
         }

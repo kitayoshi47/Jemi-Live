@@ -22,6 +22,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.IntentCompat
 import androidx.core.graphics.createBitmap
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class JemiCaptureService : Service() {
@@ -32,6 +33,13 @@ class JemiCaptureService : Service() {
     private var virtualDisplay: VirtualDisplay? = null
     private var imageReader: ImageReader? = null
     private var isCaptureRequested = false
+
+    // ジェミちゃんのアルバム（最大4枚！）
+    private val imageBuffer = mutableListOf<Bitmap>()
+    private val MAX_BUFFER_SIZE = 4
+
+    // 自動撮影のタイマー（メトロノーム）
+    private var autoCaptureJob: kotlinx.coroutines.Job? = null
 
     // ジェミちゃんの声帯！
     private lateinit var jemiVoice: JemiVoiceManager
@@ -179,6 +187,9 @@ class JemiCaptureService : Service() {
             imageReader?.surface, null, null
         )
 
+        // 画面の準備ができたらタイマー開始っ！
+        startAutoCaptureTimer()
+
         imageReader?.setOnImageAvailableListener({ reader ->
             val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
 
@@ -204,9 +215,15 @@ class JemiCaptureService : Service() {
                 val bitmap = createBitmap(bitmapWidth, image.height, Bitmap.Config.ARGB_8888)
                 bitmap.copyPixelsFromBuffer(buffer)
 
-                getJemiCommentary(bitmap)
+                imageBuffer.add(bitmap) // アルバムの最後に追加！
 
-                android.util.Log.d("Jemi-Live", "パシャリ成功して、机に置いたよっ！🌟")
+                // 4枚を超えたら、一番古い写真（0番目）を抜いて、破棄（recycle）する！
+                if (imageBuffer.size > MAX_BUFFER_SIZE) {
+                    val oldBitmap = imageBuffer.removeAt(0)
+                    oldBitmap.recycle() // 🧹これを忘れるとアプリがメモリ不足(OOM)で落ちちゃうんだ！
+                }
+
+                android.util.Log.d("Jemi-Live", "カシャッ📸 アルバムの枚数: ${imageBuffer.size}枚 (最大$MAX_BUFFER_SIZE)")
 
                 // stopSelf() // テスト用に一枚で止める
             }
@@ -225,10 +242,34 @@ class JemiCaptureService : Service() {
         imageReader?.close() // 追加: ImageReaderのお片付け
         mediaProjection?.stop()
 
+        autoCaptureJob?.cancel() // タイマーを止める！
+        imageBuffer.forEach { it.recycle() } // アルバムの写真を全部破棄する！
+        imageBuffer.clear()
+
         if (::jemiVoice.isInitialized) {
             jemiVoice.shutdown() // 声帯をお片付け
         }
         serviceScope.cancel() // 通信のお弁当箱も綺麗にするっ！
+    }
+
+    private fun startAutoCaptureTimer() {
+        // サービスのお弁当箱（serviceScope）の中でループさせるよ！
+        autoCaptureJob = serviceScope.launch {
+            while (isActive) {
+                isCaptureRequested = true // 「写真撮ってー！」とお願いする
+
+                // 画面が止まっているとカメラがサボるから、透明度をわずかに変えてOSを騙す魔法🪄
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    if (floatingView.alpha == 1.0f) {
+                        floatingView.alpha = 0.99f
+                    } else {
+                        floatingView.alpha = 1.0f
+                    }
+                }
+
+                kotlinx.coroutines.delay(2000) // 2秒（2000ミリ秒）待つっ！
+            }
+        }
     }
 
     private fun getJemiCommentary(bitmap: Bitmap) {
@@ -236,9 +277,23 @@ class JemiCaptureService : Service() {
         val tvFloatingCommentary = floatingView.findViewById<android.widget.TextView>(R.id.tv_floating_commentary)
 
         if (isDebugMode) {
-            val dummyText = "ヨチオさん、スクショ撮れたよっ！裏側に引っ越しても元気だよぉ〜！🌸"
-            tvFloatingCommentary.text = dummyText
-            jemiVoice.speak(dummyText)
+            // 👇 ここからランダムテキストの魔法だよっ！ 👇
+            val dummyResponses = listOf(
+                "わわっ！今のプレイ、めちゃくちゃカッコいいかもっ！🌸",
+                "あちゃー、今の惜しいっ！次、次いこっ！✨",
+                "ヨチオさん、天才じゃない！？今の動き、ジェミも見習いたいな〜🌟",
+                "ふむふむ、ここは慎重に進むのが吉だねっ！大学生の知恵だよっ🎓",
+                "えへへ、画面がキラキラしてて楽しいねっ！応援してるよっ！📣",
+                "ヨチオさん、スクショ撮れたよっ！裏側に引っ越しても元気だよぉ〜！🌸"
+            )
+            val dummyText = dummyResponses.random()
+
+            // サービスの中ではUI（画面）をいじる時にメインスレッド（表舞台）にお願いする必要があるから、
+            // serviceScope（Mainディスパッチャ）の中で実行するよっ！
+            serviceScope.launch {
+                tvFloatingCommentary.text = dummyText
+                jemiVoice.speak(dummyText)
+            }
             return
         }
 
