@@ -10,6 +10,8 @@ import android.graphics.Bitmap
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Bundle
+import android.widget.RadioGroup
+import android.widget.RadioButton
 import android.widget.Button
 import android.widget.ImageView
 import android.widget.TextView
@@ -17,25 +19,57 @@ import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.net.toUri
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.lifecycle.lifecycleScope
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.content
-import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
-    private lateinit var tts: android.speech.tts.TextToSpeech
+    private lateinit var jemiVoice: JemiVoiceManager
 
-    private val mainScope = MainScope()
+    // UI部品をキャッシュするための変数
+    private lateinit var tvCommentary: TextView
+    private lateinit var ivPreview: ImageView
+
+    // メインモードのUI
+    private lateinit var rgModes: RadioGroup
+    private lateinit var rgPresets: RadioGroup
+    private lateinit var btnStartLive: Button
+
+    // MainScope() は削除し、代わりに lifecycleScope を使用します
+
     private val generativeModel = GenerativeModel(
         modelName = "gemini-3.1-flash-lite-preview",
         apiKey = BuildConfig.GEMINI_API_KEY
     )
 
+    // クラスのプロパティにデバッグモードのスイッチを追加
+    private val isDebugMode = true
+
     @SuppressLint("SetTextI18n")
     private suspend fun getJemiCommentary(bitmap: Bitmap) {
+        if (isDebugMode) {
+            // --- 🧪 デバッグ用のダミー処理 ---
+            val dummyResponses = listOf(
+                "わわっ！今のプレイ、めちゃくちゃカッコいいかもっ！🌸",
+                "あちゃー、今の惜しいっ！次、次いこっ！✨",
+                "ヨチオさん、天才じゃない！？今の動き、ジェミも見習いたいな〜🌟",
+                "ふむふむ、ここは慎重に進むのが吉だねっ！大学生の知恵だよっ🎓",
+                "えへへ、画面がキラキラしてて楽しいねっ！応援してるよっ！📣"
+            )
+            val dummyText = dummyResponses.random()
+
+            runOnUiThread {
+                tvCommentary.text = "ジェミちゃん(Debug)：$dummyText"
+                jemiVoice.speak(dummyText)
+            }
+            return // ここで終了して、下のGemini呼び出しは行わない
+        }
+
         val prompt = "あなたは実況者の『ジェミちゃん』です。このゲーム画面を見て、明るく元気に、23歳の大学生らしい口調で一言実況して！"
 
         try {
@@ -48,21 +82,16 @@ class MainActivity : AppCompatActivity() {
             )
 
             // 返ってきた言葉を画面に表示するよっ🌸
-            runOnUiThread {
-                val tvCommentary = findViewById<android.widget.TextView>(R.id.tv_jemi_commentary)
-                val text = response.text ?: ""
-                tvCommentary.text = "ジェミちゃん：$text"
+            val text = response.text ?: ""
 
-                // 📢 ここで実際に喋るよっ！！
-                // QUEUE_FLUSH は「今喋ってる途中でも、新しいのが来たらそっちを優先してね！」っていう設定だよ🌟
-                // 正規表現で「絵文字や記号」を空っぽに置き換えるよ🌟
-                val cleanText = text.replace(Regex("[\\p{So}\\p{Cn}]"), "")
-                tts.speak(cleanText, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "JemiVoice")
-            }
+            // runOnUiThreadを使わなくても、lifecycleScope.launch はデフォルトでメインスレッドで動くのでUI操作可能です
+            tvCommentary.text = "ジェミちゃん：$text"
+
+            // 📢 ここで実際に喋るよっ！！
+            jemiVoice.speak(text)
+
         } catch (e: Exception) {
-            runOnUiThread {
-                Toast.makeText(this, "あわわ……お喋り失敗しちゃった：${e.message}", Toast.LENGTH_SHORT).show()
-            }
+            Toast.makeText(this@MainActivity, "あわわ……お喋り失敗しちゃった：${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -72,21 +101,25 @@ class MainActivity : AppCompatActivity() {
             val bitmap = ImageStorage.capturedBitmap
 
             if (bitmap != null) {
-                findViewById<ImageView>(R.id.iv_preview).setImageBitmap(bitmap)
-                // imageReceiver の onReceive の中、setImageBitmap(bitmap) のすぐ下に追加！
-                mainScope.launch {
+                ivPreview.setImageBitmap(bitmap)
+
+                // 拾ったあとは、机の上（ImageStorage）を片付けてメモリを空けやすくするよっ！
+                ImageStorage.capturedBitmap = null
+
+                // lifecycleScope を使うことで、Activity が閉じたら安全にキャンセルされるようになります
+                lifecycleScope.launch {
                     getJemiCommentary(bitmap)
                 }
                 Toast.makeText(context, "ジェミちゃんの視界を共有したよっ🌸", Toast.LENGTH_SHORT).show()
             }
         }
     }
+
     private lateinit var mediaProjectionManager: MediaProjectionManager
     private val startMediaProjection = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == RESULT_OK) {
-            // 1. サービスに「許可証（resultData）」を添えて起動する！
             val serviceIntent = Intent(this, JemiCaptureService::class.java).apply {
                 putExtra("RESULT_CODE", result.resultCode)
                 putExtra("RESULT_DATA", result.data)
@@ -104,51 +137,33 @@ class MainActivity : AppCompatActivity() {
         enableEdgeToEdge()
         setContentView(R.layout.activity_main)
 
-        // 他のアプリの上に重ねるための権限チェック
-        if (!android.provider.Settings.canDrawOverlays(this)) {
-            val intent = android.content.Intent(
-                android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                android.net.Uri.parse("package:$packageName")
-            )
-            startActivity(intent)
-        }
+        // Viewのキャッシュ（毎回 findViewById をしないため）
+        tvCommentary = findViewById(R.id.tv_jemi_commentary)
+        ivPreview = findViewById(R.id.iv_preview)
+        rgModes = findViewById(R.id.rg_modes)
+        rgPresets = findViewById(R.id.rg_presets)
+        btnStartLive = findViewById(R.id.btn_start_live)
 
-        // 「声」の初期化
-        tts = android.speech.tts.TextToSpeech(this) { status ->
-            if (status == android.speech.tts.TextToSpeech.SUCCESS) {
-                // 日本語を話すように設定するよっ♪
-                val result = tts.setLanguage(java.util.Locale.JAPANESE)
-                // 1.2f くらいにすると、少し高めの元気な女の子の声になるよっ♪
-                tts.setPitch(1.3f)
-                // 1.1f くらいにすると、ハキハキした感じになるよっ🌟
-                tts.setSpeechRate(1.1f)
-                if (result == android.speech.tts.TextToSpeech.LANG_MISSING_DATA ||
-                    result == android.speech.tts.TextToSpeech.LANG_NOT_SUPPORTED) {
-                    android.util.Log.e("TTS", "日本語がサポートされてないみたい……😭")
-                } else {
-                    android.util.Log.v("TTS", "お喋りする準備完了だよ！")
-                }
-            }
-        }
+        // 権限の設定
+        setupPermissions()
 
-        // onCreate の中に追加（受信機を登録！）
+        // ボイスマネージャー
+        jemiVoice = JemiVoiceManager(this)
+
         LocalBroadcastManager.getInstance(this)
             .registerReceiver(imageReceiver, IntentFilter("JEMI_IMAGE_CAPTURED"))
 
-        // onCreate の中、ボタンの設定の前あたりに置いてねっ！
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 101)
-        }
-
-        // ボタンを探して変数に入れる
-        val btnCommentary = findViewById<Button>(R.id.btn_commentary)
-
-        // マネージャーの初期化
         mediaProjectionManager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
 
-        // ボタンが押された時の処理！
-        btnCommentary.setOnClickListener {
-            // 画面キャプチャ許可のインテント（お願い状）を飛ばす！
+        btnStartLive.setOnClickListener {
+            // 選んだモードとジャンルを読み取る魔法だよっ🌸
+            val selectedMode = findViewById<RadioButton>(rgModes.checkedRadioButtonId).text
+            val selectedPreset = findViewById<RadioButton>(rgPresets.checkedRadioButtonId).text
+
+            // ちゃんと選べてるか、画面の下にポワッと文字(Toast)を出して確認してみよう！
+            Toast.makeText(this, "「$selectedMode」と「$selectedPreset」で開始するねっ！", Toast.LENGTH_SHORT).show()
+
+            // 今まで通り、キャプチャの許可をもらう処理をスタート！
             startMediaProjection.launch(mediaProjectionManager.createScreenCaptureIntent())
         }
 
@@ -160,11 +175,29 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        // アプリが終わるときにTTSを止めて、資源を解放するよっ！
-        if (::tts.isInitialized) {
-            tts.stop()
-            tts.shutdown()
+        // メモリリークを防ぐため、Receiverの登録を解除するよっ！
+        LocalBroadcastManager.getInstance(this).unregisterReceiver(imageReceiver)
+
+        if (::jemiVoice.isInitialized) {
+            jemiVoice.shutdown()
         }
         super.onDestroy()
+    }
+
+    private fun setupPermissions() {
+        // 1. 魔法の透明レイヤー（オーバーレイ）の権限チェックだよっ！
+        if (!android.provider.Settings.canDrawOverlays(this)) {
+            val intent = Intent(
+                android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                "package:$packageName".toUri()
+            )
+            startActivity(intent)
+            Toast.makeText(this, "「他のアプリの上に重ねて表示」を許可してねっ！", Toast.LENGTH_LONG).show()
+        }
+
+        // 2. 通知の権限チェック（Android 13 / API 33 以上）だよっ！
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 101)
+        }
     }
 }

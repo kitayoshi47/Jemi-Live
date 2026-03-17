@@ -1,6 +1,3 @@
 <resources>
     <string name="app_name">Jemi-Live</string>
-    <string name="btn_label_commentary">実況して！</string>
-    <string name="image_label_description">キャプチャプレビュー画面</string>
-    <string name="textview_default_text">ジェミちゃんの実況を待ってるよっ🌸</string>
 </resources>

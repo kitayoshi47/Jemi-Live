@@ -1,49 +1,123 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
-    xmlns:tools="http://schemas.android.com/tools"
-    android:id="@+id/main"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    tools:context=".MainActivity">
+    android:fillViewport="true">
 
-    <Button
-        android:id="@+id/btn_commentary"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="32dp"
-        android:text="@string/btn_label_commentary"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintHorizontal_bias="0.498"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
-
-    <ImageView
-        android:id="@+id/iv_preview"
-        android:layout_width="300dp"
-        android:layout_height="400dp"
-        android:layout_marginTop="20dp"
-        android:contentDescription="@string/image_label_description"
-        android:scaleType="fitCenter"
-        app:layout_constraintTop_toBottomOf="@id/btn_commentary"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
-
-    <ScrollView
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:id="@+id/main"
         android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_margin="16dp"
-        app:layout_constraintTop_toBottomOf="@id/iv_preview"
-        app:layout_constraintBottom_toBottomOf="parent">
+        android:layout_height="wrap_content"
+        android:padding="24dp">
+
+        <TextView
+            android:id="@+id/tv_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Jemi-Live 準備画面"
+            android:textSize="24sp"
+            android:textStyle="bold"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent" />
+
+        <TextView
+            android:id="@+id/tv_mode_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="動作モードを選んでねっ！"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/tv_title" />
+
+        <RadioGroup
+            android:id="@+id/rg_modes"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:checkedButton="@+id/rb_mode_niconico"
+            app:layout_constraintTop_toBottomOf="@id/tv_mode_label">
+
+            <RadioButton android:id="@+id/rb_mode_niconico" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="ニコニコモード (賑やかし特化)"/>
+            <RadioButton android:id="@+id/rb_mode_subtitle" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="字幕モード (攻略・解説特化)"/>
+            <RadioButton android:id="@+id/rb_mode_radio" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="ラジオモード (ながら見・定期報告)"/>
+        </RadioGroup>
+
+        <TextView
+            android:id="@+id/tv_preset_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="今のゲームのジャンルは？"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/rg_modes" />
+
+        <RadioGroup
+            android:id="@+id/rg_presets"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:checkedButton="@+id/rb_preset_action"
+            app:layout_constraintTop_toBottomOf="@id/tv_preset_label">
+
+            <RadioButton android:id="@+id/rb_preset_action" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="⚔️ アクション (1秒間隔・ノリ重視)"/>
+            <RadioButton android:id="@+id/rb_preset_rpg" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📖 RPG (15秒間隔・文脈重視)"/>
+            <RadioButton android:id="@+id/rb_preset_idle" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="💤 省エネ (放置・見守り)"/>
+        </RadioGroup>
+
+        <Button
+            android:id="@+id/btn_start_live"
+            android:layout_width="0dp"
+            android:layout_height="60dp"
+            android:layout_marginTop="32dp"
+            android:text="LIVE開始！"
+            android:textSize="20sp"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/rg_presets" />
+
+        <View
+            android:id="@+id/divider"
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="32dp"
+            android:background="#CCCCCC"
+            app:layout_constraintTop_toBottomOf="@id/btn_start_live" />
+
+        <TextView
+            android:id="@+id/tv_debug_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="--- テスト用デバッグエリア ---"
+            android:textColor="#888888"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/divider" />
+
+        <ImageView
+            android:id="@+id/iv_preview"
+            android:layout_width="150dp"
+            android:layout_height="200dp"
+            android:layout_marginTop="8dp"
+            android:scaleType="fitCenter"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/tv_debug_label" />
 
         <TextView
             android:id="@+id/tv_jemi_commentary"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/textview_default_text"
-            android:textSize="18sp"
-            android:textColor="#000000"
-            android:padding="10dp"
-            android:background="#F0F0F0" /> </ScrollView>
+            android:layout_marginTop="8dp"
+            android:background="#EEEEEE"
+            android:padding="8dp"
+            app:layout_constraintTop_toBottomOf="@id/iv_preview" />
 
-</androidx.constraintlayout.widget.ConstraintLayout>
+    </androidx.constraintlayout.widget.ConstraintLayout>
+</androidx.core.widget.NestedScrollView>
