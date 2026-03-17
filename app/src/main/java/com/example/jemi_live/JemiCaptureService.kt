@@ -236,9 +236,23 @@ class JemiCaptureService : Service() {
         val tvFloatingCommentary = floatingView.findViewById<android.widget.TextView>(R.id.tv_floating_commentary)
 
         if (isDebugMode) {
-            val dummyText = "ヨチオさん、スクショ撮れたよっ！裏側に引っ越しても元気だよぉ〜！🌸"
-            tvFloatingCommentary.text = dummyText
-            jemiVoice.speak(dummyText)
+            // 👇 ここからランダムテキストの魔法だよっ！ 👇
+            val dummyResponses = listOf(
+                "わわっ！今のプレイ、めちゃくちゃカッコいいかもっ！🌸",
+                "あちゃー、今の惜しいっ！次、次いこっ！✨",
+                "ヨチオさん、天才じゃない！？今の動き、ジェミも見習いたいな〜🌟",
+                "ふむふむ、ここは慎重に進むのが吉だねっ！大学生の知恵だよっ🎓",
+                "えへへ、画面がキラキラしてて楽しいねっ！応援してるよっ！📣",
+                "ヨチオさん、スクショ撮れたよっ！裏側に引っ越しても元気だよぉ〜！🌸"
+            )
+            val dummyText = dummyResponses.random()
+
+            // サービスの中ではUI（画面）をいじる時にメインスレッド（表舞台）にお願いする必要があるから、
+            // serviceScope（Mainディスパッチャ）の中で実行するよっ！
+            serviceScope.launch {
+                tvFloatingCommentary.text = dummyText
+                jemiVoice.speak(dummyText)
+            }
             return
         }
 
