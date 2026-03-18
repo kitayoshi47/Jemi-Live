@@ -23,12 +23,10 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.ImageView
-import android.widget.TextView
 import androidx.core.app.NotificationCompat
 import androidx.core.content.IntentCompat
 import androidx.core.graphics.createBitmap
 import com.google.ai.client.generativeai.GenerativeModel
-import com.google.ai.client.generativeai.type.content
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -38,11 +36,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import android.view.Choreographer
 
 class JemiCaptureService : Service() {
     private lateinit var windowManager: WindowManager
     private lateinit var floatingView: View
-
+    private lateinit var previewView: ImageView
     private var mediaProjection: MediaProjection? = null
     private var virtualDisplay: VirtualDisplay? = null
     private var imageReader: ImageReader? = null
@@ -78,82 +77,102 @@ class JemiCaptureService : Service() {
         jemiVoice = JemiVoiceManager(this)
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
 
-        // フローティング・ウィンドウの設定（OSへの「貼り付け指定」）
-        val params = WindowManager.LayoutParams(
+        // 📺 1. モニター（プレビュー）の設定：【左上】に配置！
+        val previewParams = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            // FLAG_NOT_TOUCHABLE を付けると、写真をタップしても後ろのマリオが動く魔法🪄
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = android.view.Gravity.TOP or android.view.Gravity.START // 左上！
+            x = 16
+            y = 16
+        }
+        // さっき作った新しいXML（モニター）を読み込むよっ！
+        previewView = LayoutInflater.from(this).inflate(R.layout.layout_floating_preview, null) as ImageView
+        previewView.visibility = View.GONE
+        windowManager.addView(previewView, previewParams)
+
+        // 🎮 2. リモコン（ボタン）の設定：【右下】に配置！
+        val controlParams = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT
-        )
-
-        // レイアウトを膨らませて画面に追加！
+        ).apply {
+            gravity = android.view.Gravity.BOTTOM or android.view.Gravity.END // 右下！
+            x = 32
+            y = 32
+        }
         floatingView = LayoutInflater.from(this).inflate(R.layout.layout_floating_jemi, null)
-        windowManager.addView(floatingView, params)
+        windowManager.addView(floatingView, controlParams)
 
-        // 撮影ボタンを押した時にフラグをONにする
-        val btnCapture = floatingView.findViewById<Button>(R.id.btn_floating_capture)
+        val btnTogglePreview = floatingView.findViewById<Button>(R.id.btn_floating_toggle_preview)
 
-        btnCapture.setOnClickListener {
-            // アルバムに写真がなかったら何もしない！
-            if (imageBuffer.isEmpty()) {
-                android.widget.Toast.makeText(this, "まだ写真が貯まってないよぉ💦", android.widget.Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
+        // デバッグモードの時だけ「🖼️」ボタンを見せる魔法✨
+        if (isDebugMode) {
+            btnTogglePreview.visibility = View.VISIBLE
+        }
+
+        btnTogglePreview.setOnClickListener {
+            // モニターの表示・非表示をパチパチ切り替えるよ！
+            if (previewView.visibility == View.VISIBLE) {
+                previewView.visibility = View.GONE
+            } else {
+                previewView.visibility = View.VISIBLE
             }
+        }
 
-            // 1. アルバムの写真をコピーして、職人にガッチャンコしてもらう！
-            val gatchankoBitmap = createGatchankoBitmap(imageBuffer.toList())
+        // 📸 撮影ボタンを押した時の処理
+        val btnCapture = floatingView.findViewById<Button>(R.id.btn_floating_capture)
+        btnCapture.setOnClickListener {
+            if (imageBuffer.isEmpty()) return@setOnClickListener
 
+            val gatchankoBitmap = createGatchankoBitmap(imageBuffer.toList()) // [cite: 8]
             if (gatchankoBitmap != null) {
-                // 2. 魔法の透明レイヤーにある「プレビュー画面（iv_mini_preview）」に表示！
-                val ivMiniPreview = floatingView.findViewById<ImageView>(R.id.iv_mini_preview)
-                ivMiniPreview.setImageBitmap(gatchankoBitmap)
-                ivMiniPreview.visibility = android.view.View.VISIBLE
-                // 3. ジェミちゃんの脳みそに「完成した横長フィルム」を渡す！
+                // 📸ボタンを押した時だけは、一時的にモニターに映してあげるっ！
+                if (isDebugMode) {
+                    previewView.setImageBitmap(gatchankoBitmap)
+                    previewView.visibility = View.VISIBLE
+                }
                 getJemiCommentary(gatchankoBitmap)
             }
         }
 
-        // ライブモード終了ボタン処理
+        // ❌ ライブモード終了ボタン処理
         val btnClose = floatingView.findViewById<Button>(R.id.btn_floating_close)
         btnClose.setOnClickListener {
-            // ① メイン画面（MainActivity）を呼び起こすインテント（招待状）を作る！
             val intent = Intent(this, MainActivity::class.java).apply {
-                // FLAG_ACTIVITY_NEW_TASK: サービスから画面を開く時の絶対のルール！
-                // FLAG_ACTIVITY_CLEAR_TOP: すでにメイン画面が裏にいたら、新しく作らずにそれを手前に引っ張り出す！
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             }
             startActivity(intent)
-
-            // ② ジェミちゃんのライブモード（サービス）を終了させる！
             stopSelf()
         }
 
-        // 座標を記憶するための「メモ帳」変数だよっ📝
+        // 👆 座標を記憶するための「メモ帳」変数📝
         var initialX = 0
         var initialY = 0
         var initialTouchX = 0f
         var initialTouchY = 0f
 
-        // ジェミちゃんの画面（floatingView）に、タッチセンサーを貼り付けるよ！
+        // タッチセンサー（右下基準のマイナス計算！）
         floatingView.setOnTouchListener { _, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
-                    // 👆 指が触れた瞬間の、UIの場所と指の場所をメモする！
-                    initialX = params.x
-                    initialY = params.y
+                    initialX = controlParams.x
+                    initialY = controlParams.y
                     initialTouchX = event.rawX
                     initialTouchY = event.rawY
-                    // falseを返すことで、中にあるボタン（パシャリ！ボタン）もちゃんと押せるようにするよっ
                     false
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    // 👆 指が動いた距離を計算して、新しい場所を決めるよっ！
-                    params.x = initialX + (event.rawX - initialTouchX).toInt()
-                    params.y = initialY + (event.rawY - initialTouchY).toInt()
-
-                    // 画面の管理人（WindowManager）に「ここへ移動させて！」とお願い✨
-                    windowManager.updateViewLayout(floatingView, params)
+                    // 右下（END/BOTTOM）に引っ張っているから、動かした距離を「引く」！
+                    controlParams.x = initialX - (event.rawX - initialTouchX).toInt()
+                    controlParams.y = initialY - (event.rawY - initialTouchY).toInt()
+                    windowManager.updateViewLayout(floatingView, controlParams)
                     true
                 }
                 else -> false
@@ -225,14 +244,14 @@ class JemiCaptureService : Service() {
 
             // お願いされてない時（フラグがfalse）は、画像をそのまま捨てて何もしない！
             if (!isCaptureRequested) {
-                image.close() // メモリがパンクしないように必ず閉じるっ！
+                image.close()
                 return@setOnImageAvailableListener
             }
 
             // お願いされてた時（フラグがtrue）は、1枚撮るからフラグを元に戻すよ！
             isCaptureRequested = false
 
-            image.use { image ->
+            image.use { img ->
                 // 1. ここで Bitmap を作る
                 val planes = image.planes
                 val buffer = planes[0].buffer
@@ -242,15 +261,13 @@ class JemiCaptureService : Service() {
 
                 // 修正: 標準の Bitmap.createBitmap を使用
                 val bitmapWidth = image.width + rowPadding / pixelStride
-                val bitmap = createBitmap(bitmapWidth, image.height, Bitmap.Config.ARGB_8888)
+                val bitmap = createBitmap(bitmapWidth, img.height, Bitmap.Config.ARGB_8888)
                 bitmap.copyPixelsFromBuffer(buffer)
 
-                imageBuffer.add(bitmap) // アルバムの最後に追加！
-
-                // 4枚を超えたら、一番古い写真（0番目）を抜いて、破棄（recycle）する！
+                imageBuffer.add(bitmap)
                 if (imageBuffer.size > MAX_BUFFER_SIZE) {
                     val oldBitmap = imageBuffer.removeAt(0)
-                    oldBitmap.recycle() // 🧹これを忘れるとアプリがメモリ不足(OOM)で落ちちゃうんだ！
+                    oldBitmap.recycle()
                 }
 
                 Log.d("Jemi-Live", "カシャッ📸 アルバムの枚数: ${imageBuffer.size}枚 (最大$MAX_BUFFER_SIZE)")
@@ -265,6 +282,10 @@ class JemiCaptureService : Service() {
         // 1. フローティングビューを忘れずに剥がす！（WindowLeaked対策）
         if (::floatingView.isInitialized) {
             windowManager.removeView(floatingView)
+        }
+
+        if (::previewView.isInitialized) {
+            windowManager.removeView(previewView)
         }
 
         // 2. 使い終わった道具はちゃんとお片付け！
@@ -283,21 +304,21 @@ class JemiCaptureService : Service() {
     }
 
     private fun startAutoCaptureTimer() {
-        // サービスのお弁当箱（serviceScope）の中でループさせるよ！
         autoCaptureJob = serviceScope.launch {
             while (isActive) {
-                isCaptureRequested = true // 「写真撮ってー！」とお願いする
+                // 👇 モニター（previewView）が出ていない時だけ、写真を撮るよっ！
+                if (previewView.visibility != View.VISIBLE) {
+                    isCaptureRequested = true
 
-                // 画面が止まっているとカメラがサボるから、透明度をわずかに変えてOSを騙す魔法🪄
-                withContext(Dispatchers.Main) {
-                    if (floatingView.alpha == 1.0f) {
-                        floatingView.alpha = 0.99f
-                    } else {
-                        floatingView.alpha = 1.0f
+                    withContext(Dispatchers.Main) {
+                        // OSを騙すための透明度切り替えだけ残しておくねっ🪄
+                        floatingView.alpha = if (floatingView.alpha == 1.0f) 0.99f else 1.0f
                     }
+                } else {
+                    Log.d("Jemi-Live", "モニター表示中だから撮影はお休みするねっ💤")
                 }
 
-                delay(2000) // 2秒（2000ミリ秒）待つっ！
+                delay(2000) // 2秒待機 [cite: 7]
             }
         }
     }
@@ -345,6 +366,9 @@ class JemiCaptureService : Service() {
                     23歳の元気な大学生らしい、親密な口調で一言だけ実況して！
     
                     【重要ルール】
+                    // 👇 この1文を追加するよっ！ 👇
+                    ・画面右下にある「📸」「❌」「🖼️」などのアイコンは実況アプリのUIです。これらには絶対に言及せず、純粋にゲームの映像だけを見て実況してください。
+                    // 👆 ---------------------- 👆
                     ・確信が持てない詳細（数値や敵の名前など）については断定を避け、「推測であること」を明示するか、別の切り口（音、色、勢い）でリアクションしてください。
                     ・画像が不鮮明だったり展開が早すぎた場合は、「ごめん、よく見えなかった！ｗ」などのマイルドな敗北宣言を混ぜてください。
                     ・前の状況を引きずらず、必ず「今（一番右の画像）」何が起きているかに注目してください。
