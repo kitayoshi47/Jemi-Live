@@ -7,6 +7,8 @@ import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
+import android.graphics.PixelFormat
+import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.media.ImageReader
 import android.media.projection.MediaProjection
@@ -14,16 +16,28 @@ import android.media.projection.MediaProjectionManager
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.util.Log
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.Button
+import android.widget.ImageView
+import android.widget.TextView
 import androidx.core.app.NotificationCompat
 import androidx.core.content.IntentCompat
 import androidx.core.graphics.createBitmap
+import com.google.ai.client.generativeai.GenerativeModel
+import com.google.ai.client.generativeai.type.content
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class JemiCaptureService : Service() {
     private lateinit var windowManager: WindowManager
@@ -39,24 +53,24 @@ class JemiCaptureService : Service() {
     private val MAX_BUFFER_SIZE = 4
 
     // 自動撮影のタイマー（メトロノーム）
-    private var autoCaptureJob: kotlinx.coroutines.Job? = null
+    private var autoCaptureJob: Job? = null
 
     // ジェミちゃんの声帯！
     private lateinit var jemiVoice: JemiVoiceManager
 
     // サービス専用のコルーチンスコープ（非同期処理のお弁当箱だよっ！）
-    private val serviceScope = kotlinx.coroutines.CoroutineScope(
-        kotlinx.coroutines.Dispatchers.Main + kotlinx.coroutines.SupervisorJob()
+    private val serviceScope = CoroutineScope(
+        Dispatchers.Main + SupervisorJob()
     )
 
     // ジェミちゃんの脳みそ（Gemini API）！
-    private val generativeModel = com.google.ai.client.generativeai.GenerativeModel(
+    private val generativeModel = GenerativeModel(
         modelName = "gemini-3.1-flash-lite-preview",
         apiKey = BuildConfig.GEMINI_API_KEY
     )
 
     // 今はまだテストだからtrueにしておくねっ！
-    private val isDebugMode = true
+    private val isDebugMode = false //true
 
     @SuppressLint("InflateParams", "ClickableViewAccessibility")
     override fun onCreate() {
@@ -69,8 +83,8 @@ class JemiCaptureService : Service() {
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, // ゲームの操作を邪魔しない！
-            android.graphics.PixelFormat.TRANSLUCENT
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            PixelFormat.TRANSLUCENT
         )
 
         // レイアウトを膨らませて画面に追加！
@@ -79,9 +93,25 @@ class JemiCaptureService : Service() {
 
         // 撮影ボタンを押した時にフラグをONにする
         val btnCapture = floatingView.findViewById<Button>(R.id.btn_floating_capture)
+
         btnCapture.setOnClickListener {
-            // ボタンが押されたら「写真撮ってー！」とお願いするっ！
-            isCaptureRequested = true
+            // アルバムに写真がなかったら何もしない！
+            if (imageBuffer.isEmpty()) {
+                android.widget.Toast.makeText(this, "まだ写真が貯まってないよぉ💦", android.widget.Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            // 1. アルバムの写真をコピーして、職人にガッチャンコしてもらう！
+            val gatchankoBitmap = createGatchankoBitmap(imageBuffer.toList())
+
+            if (gatchankoBitmap != null) {
+                // 2. 魔法の透明レイヤーにある「プレビュー画面（iv_mini_preview）」に表示！
+                val ivMiniPreview = floatingView.findViewById<ImageView>(R.id.iv_mini_preview)
+                ivMiniPreview.setImageBitmap(gatchankoBitmap)
+                ivMiniPreview.visibility = android.view.View.VISIBLE
+                // 3. ジェミちゃんの脳みそに「完成した横長フィルム」を渡す！
+                getJemiCommentary(gatchankoBitmap)
+            }
         }
 
         // ライブモード終了ボタン処理
@@ -108,7 +138,7 @@ class JemiCaptureService : Service() {
         // ジェミちゃんの画面（floatingView）に、タッチセンサーを貼り付けるよ！
         floatingView.setOnTouchListener { _, event ->
             when (event.action) {
-                android.view.MotionEvent.ACTION_DOWN -> {
+                MotionEvent.ACTION_DOWN -> {
                     // 👆 指が触れた瞬間の、UIの場所と指の場所をメモする！
                     initialX = params.x
                     initialY = params.y
@@ -117,7 +147,7 @@ class JemiCaptureService : Service() {
                     // falseを返すことで、中にあるボタン（パシャリ！ボタン）もちゃんと押せるようにするよっ
                     false
                 }
-                android.view.MotionEvent.ACTION_MOVE -> {
+                MotionEvent.ACTION_MOVE -> {
                     // 👆 指が動いた距離を計算して、新しい場所を決めるよっ！
                     params.x = initialX + (event.rawX - initialTouchX).toInt()
                     params.y = initialY + (event.rawY - initialTouchY).toInt()
@@ -179,11 +209,11 @@ class JemiCaptureService : Service() {
         }, Handler(Looper.getMainLooper()))
 
         // ImageReader の準備
-        imageReader = ImageReader.newInstance(width, height, android.graphics.PixelFormat.RGBA_8888, 2)
+        imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
 
         virtualDisplay = mediaProjection?.createVirtualDisplay(
             "JemiCapture", width, height, density,
-            android.hardware.display.DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
             imageReader?.surface, null, null
         )
 
@@ -223,7 +253,7 @@ class JemiCaptureService : Service() {
                     oldBitmap.recycle() // 🧹これを忘れるとアプリがメモリ不足(OOM)で落ちちゃうんだ！
                 }
 
-                android.util.Log.d("Jemi-Live", "カシャッ📸 アルバムの枚数: ${imageBuffer.size}枚 (最大$MAX_BUFFER_SIZE)")
+                Log.d("Jemi-Live", "カシャッ📸 アルバムの枚数: ${imageBuffer.size}枚 (最大$MAX_BUFFER_SIZE)")
 
                 // stopSelf() // テスト用に一枚で止める
             }
@@ -259,7 +289,7 @@ class JemiCaptureService : Service() {
                 isCaptureRequested = true // 「写真撮ってー！」とお願いする
 
                 // 画面が止まっているとカメラがサボるから、透明度をわずかに変えてOSを騙す魔法🪄
-                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                withContext(Dispatchers.Main) {
                     if (floatingView.alpha == 1.0f) {
                         floatingView.alpha = 0.99f
                     } else {
@@ -267,15 +297,12 @@ class JemiCaptureService : Service() {
                     }
                 }
 
-                kotlinx.coroutines.delay(2000) // 2秒（2000ミリ秒）待つっ！
+                delay(2000) // 2秒（2000ミリ秒）待つっ！
             }
         }
     }
 
     private fun getJemiCommentary(bitmap: Bitmap) {
-        // 透明レイヤーの文字を書き換える準備っ！
-        val tvFloatingCommentary = floatingView.findViewById<android.widget.TextView>(R.id.tv_floating_commentary)
-
         if (isDebugMode) {
             // 👇 ここからランダムテキストの魔法だよっ！ 👇
             val dummyResponses = listOf(
@@ -291,29 +318,96 @@ class JemiCaptureService : Service() {
             // サービスの中ではUI（画面）をいじる時にメインスレッド（表舞台）にお願いする必要があるから、
             // serviceScope（Mainディスパッチャ）の中で実行するよっ！
             serviceScope.launch {
-                tvFloatingCommentary.text = dummyText
                 jemiVoice.speak(dummyText)
+                android.util.Log.d("Jemi-Live", "📢 デバッグ実況： $dummyText")
             }
             return
         }
 
-        // ここから本番のAPI通信（今はデバッグモードだから呼ばれないけど準備だけね！）
+        // ここから本番のAPI通信（デバッグモードだと呼ばれないよ！）
         serviceScope.launch {
             try {
-                val prompt = "あなたはゲーム実況の相棒ジェミちゃんです。この画面を見て、親密で元気な口調で一言コメントして！"
+                // JPEG圧縮
+                val outputStream = java.io.ByteArrayOutputStream()
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 60, outputStream)
+
+                // ログで圧縮後のサイズ（キロバイト）を確認してみよう！
+                val jpegBytes = outputStream.toByteArray()
+                android.util.Log.d("Jemi-Live", "圧縮後の画像サイズ: ${jpegBytes.size / 1024} KB")
+
+                // APIのキャッシュサボりを防ぐために、現在の「時間」を取得！
+                val currentTime = System.currentTimeMillis()
+
+                // 仕様書を完全再現した「最強のプロンプト」だよっ！🔥
+                val prompt = """
+                    あなたはゲーム実況の相棒「ジェミちゃん」です。
+                    これは1秒〜2秒間隔で撮影された、連続するゲーム画面（左から右へ時間が進みます）です。
+                    23歳の元気な大学生らしい、親密な口調で一言だけ実況して！
+    
+                    【重要ルール】
+                    ・確信が持てない詳細（数値や敵の名前など）については断定を避け、「推測であること」を明示するか、別の切り口（音、色、勢い）でリアクションしてください。
+                    ・画像が不鮮明だったり展開が早すぎた場合は、「ごめん、よく見えなかった！ｗ」などのマイルドな敗北宣言を混ぜてください。
+                    ・前の状況を引きずらず、必ず「今（一番右の画像）」何が起きているかに注目してください。
+                    
+                    (システム用ハッシュ: $currentTime)
+                """.trimIndent()
+
                 val inputContent = com.google.ai.client.generativeai.type.content {
-                    image(bitmap)
+                    blob("image/jpeg", jpegBytes)
                     text(prompt)
                 }
-                val response = generativeModel.generateContent(inputContent)
-                val replyText = response.text ?: "うーん、よく見えなかったみたい💦"
 
-                tvFloatingCommentary.text = replyText
-                jemiVoice.speak(replyText)
+                val response = generativeModel.generateContent(inputContent)
+                val replyText = response.text ?: "うーん、ちょっとわかんなかったみたい💦"
+
+                // ログに「Jemi-Live」というタグで実況内容を流すよっ！
+                android.util.Log.d("Jemi-Live", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                android.util.Log.d("Jemi-Live", "📢 ジェミの実況： $replyText")
+                android.util.Log.d("Jemi-Live", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+                // 画面の更新とお喋りはメイン舞台（Mainスレッド）にお願いするよっ！
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    jemiVoice.speak(replyText)
+                }
+
             } catch (e: Exception) {
                 android.util.Log.e("Jemi-Live", "通信エラーみたい……", e)
-                tvFloatingCommentary.text = "ごめんね、エラーになっちゃった😭"
             }
         }
+    }
+
+    private fun createGatchankoBitmap(bitmaps: List<Bitmap>): Bitmap? {
+        if (bitmaps.isEmpty()) return null
+
+        // 1. メモリ爆発を防ぐためのリサイズ計算！
+        // 4枚横に並べると巨大になっちゃうから、1枚の高さを「300px」くらいに圧縮するよ！
+        val targetHeight = 300
+        val scale = targetHeight.toFloat() / bitmaps[0].height
+        val targetWidth = (bitmaps[0].width * scale).toInt()
+
+        // 2. 4枚を横に並べるための、大きな横長キャンバス（フィルム）を作る！
+        val totalWidth = targetWidth * bitmaps.size
+        val resultBitmap = Bitmap.createBitmap(totalWidth, targetHeight, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(resultBitmap)
+
+        // 3. AIに時間の区切りを教えるため、背景を真っ黒に塗るっ！（これが境界線になるよ！）
+        canvas.drawColor(android.graphics.Color.BLACK)
+
+        val paint = android.graphics.Paint()
+        var currentX = 0
+
+        // 4. 写真を1枚ずつ、キャンバスにペタペタ貼っていくよ！
+        for (bitmap in bitmaps) {
+            // 意図的に上下左右に2pxの隙間を空けて貼ることで、黒い境界線が浮かび上がる職人技✨
+            val destRect = android.graphics.Rect(
+                currentX + 2, 2, currentX + targetWidth - 2, targetHeight - 2
+            )
+            canvas.drawBitmap(bitmap, null, destRect, paint)
+
+            // 次の写真を貼る位置へ移動！
+            currentX += targetWidth
+        }
+
+        return resultBitmap
     }
 }

@@ -14,7 +14,7 @@ class JemiVoiceManager(context: Context) : TextToSpeech.OnInitListener {
         if (status == TextToSpeech.SUCCESS) {
             val result = tts.setLanguage(Locale.JAPANESE)
             tts.setPitch(1.3f) // ジェミちゃんの元気な声の高さ！
-            tts.setSpeechRate(1.1f) // ちょっと早口っ！
+            tts.setSpeechRate(1.2f) // ちょっと早口っ！
 
             if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
                 Log.e("JemiVoice", "日本語がサポートされてないみたい……😭")
