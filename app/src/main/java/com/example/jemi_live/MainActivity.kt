@@ -27,6 +27,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var etOmajinai: EditText
     private lateinit var rgModes: RadioGroup
     private lateinit var rgPresets: RadioGroup
+    private lateinit var rgDisplayMode: RadioGroup
     private lateinit var mediaProjectionManager: MediaProjectionManager
 
     // スクリーンキャプチャの許可ダイアログからの戻り
@@ -38,6 +39,8 @@ class MainActivity : AppCompatActivity() {
             val omajinai = etOmajinai.text.toString()
             val selectedModeId = rgModes.checkedRadioButtonId
             val selectedPresetId = rgPresets.checkedRadioButtonId
+            val selectedDisplayModeId = rgDisplayMode.checkedRadioButtonId
+            val isSingleMode = selectedDisplayModeId == R.id.rb_display_single
 
             // 選択されたテキストを取得するよ
             val modeText = findViewById<RadioButton>(selectedModeId)?.text?.toString() ?: ""
@@ -59,6 +62,8 @@ class MainActivity : AppCompatActivity() {
                 putString("omajinai", omajinai)
                 putInt("last_mode_id", selectedModeId)
                 putInt("last_preset_id", selectedPresetId)
+                putInt("last_display_mode_id", selectedDisplayModeId)
+                putBoolean("is_single_display_mode", isSingleMode)
                 apply()
             }
 
@@ -79,6 +84,7 @@ class MainActivity : AppCompatActivity() {
         etOmajinai = findViewById(R.id.et_omajinai)
         rgModes = findViewById(R.id.rg_modes)
         rgPresets = findViewById(R.id.rg_presets)
+        rgDisplayMode = findViewById(R.id.rg_display_mode)
         mediaProjectionManager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
 
         // 権限の準備
@@ -105,6 +111,14 @@ class MainActivity : AppCompatActivity() {
                 rgPresets.check(lastPresetId)
             } catch (e: Exception) {
                 // IDが変わっている場合はデフォルトを選択
+            }
+        }
+
+        val lastDisplayModeId = prefs.getInt("last_display_mode_id", -1)
+        if (lastDisplayModeId != -1) {
+            try {
+                rgDisplayMode.check(lastDisplayModeId)
+            } catch (e: Exception) {
             }
         }
 

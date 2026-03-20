@@ -14,11 +14,13 @@ import android.hardware.display.VirtualDisplay
 import android.media.ImageReader
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
+import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.util.DisplayMetrics
 import android.util.Log
+import android.view.Display
 import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.MotionEvent
@@ -46,28 +48,34 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * JemiCaptureService (v2.4.4 - Button State Feedback)
- * - 撮影ボタンのクールタイム＆思考中UIフィードバックを追加（📸 ⇄ ⏳）
+ * JemiCaptureService (v2.6.0 - Dual Layout Supported)
+ * - 1画面モードと2画面モードのレイアウト分岐を実装
  */
 class JemiCaptureService : Service() {
-    private lateinit var windowManager: WindowManager
+    private lateinit var mainWindowManager: WindowManager
+    private lateinit var uiWindowManager: WindowManager
     private lateinit var prefs: SharedPreferences
     private val handler = Handler(Looper.getMainLooper())
 
-    private lateinit var controlView: View
-    private lateinit var commentaryView: View
-    private lateinit var previewView: ImageView
+    // 💡 どちらのモードでも共通で使う部品だよ
     private lateinit var recognitionFrameView: FrameLayout
     private lateinit var tvCommentary: TextView
-    private lateinit var btnCapture: Button // 💡 キャプチャボタンの状態を変えるために保持するよっ
+    private lateinit var btnCapture: Button
+    private lateinit var previewView: ImageView
+
+    // 💡 UI削除用に保持しておくView
+    private var singleControlView: View? = null
+    private var singleCommentaryView: View? = null
+    private var singlePreviewView: View? = null
+    private var dualCockpitView: View? = null
 
     private var lastCaptureTime = 0L
     private var mediaProjection: MediaProjection? = null
     private var virtualDisplay: VirtualDisplay? = null
     private var imageReader: ImageReader? = null
     private var isCaptureRequested = false
-    private var isGeminiThinking = false // 💡 ジェミが考え中かどうかを判定するフラグだよっ
-    private var currentPreviewBitmap: Bitmap? = null // 💡 プレビュー中の画像を保持しておくよっ！
+    private var isGeminiThinking = false
+    private var currentPreviewBitmap: Bitmap? = null
 
     private val imageBuffer = mutableListOf<Bitmap>()
     private val MAX_BUFFER_SIZE = 4
@@ -80,24 +88,45 @@ class JemiCaptureService : Service() {
     private var generativeModel: GenerativeModel? = null
     private var customOmajinai: String = ""
 
-    private var isDebugMode = true // 🛠️ テスト用にtrue
+    private var isDebugMode = true
+    private var isSingleMode = false // 💡 モード判定を全体で使えるようにメンバ変数として追加したよっ！
 
     override fun onCreate() {
         super.onCreate()
         prefs = getSharedPreferences("JemiSettings", Context.MODE_PRIVATE)
         jemiVoice = JemiVoiceManager(this)
-        windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+
+        mainWindowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+        uiWindowManager = mainWindowManager
+
         setupFloatingWindows()
     }
 
-    @SuppressLint("InflateParams", "ClickableViewAccessibility")
     private fun setupFloatingWindows() {
-        val metrics = DisplayMetrics()
-        windowManager.defaultDisplay.getRealMetrics(metrics)
-        val screenW = metrics.widthPixels
-        val screenH = metrics.heightPixels
+        // 💡 ここにあった "val" を消して、上のメンバ変数に記憶させるようにしたよっ！
+        isSingleMode = prefs.getBoolean("is_single_display_mode", false)
 
-        // --- 1. 実況認識ガイド ---
+        if (!isSingleMode) {
+            val displayManager = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+            val displays = displayManager.displays
+            for (display in displays) {
+                if (display.displayId != Display.DEFAULT_DISPLAY) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        val displayContext = createDisplayContext(display)
+                        val windowContext = displayContext.createWindowContext(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, null)
+                        uiWindowManager = windowContext.getSystemService(WindowManager::class.java)
+                    }
+                    break
+                }
+            }
+        }
+
+        // --- 1. 実況認識ガイド（🟩 メイン画面に共通で配置） ---
+        val mainMetrics = DisplayMetrics()
+        mainWindowManager.defaultDisplay.getRealMetrics(mainMetrics)
+        val screenW = mainMetrics.widthPixels
+        val screenH = mainMetrics.heightPixels
+
         var frameW = prefs.getInt("frame_w", (screenH * 4 / 3).coerceAtMost(screenW))
         var frameH = prefs.getInt("frame_h", screenH.coerceAtMost((frameW * 3 / 4)))
         val frameParams = WindowManager.LayoutParams(
@@ -121,112 +150,137 @@ class JemiCaptureService : Service() {
                 setBackgroundColor(Color.GREEN); alpha = 0.5f
             })
         }
-        windowManager.addView(recognitionFrameView, frameParams)
+        mainWindowManager.addView(recognitionFrameView, frameParams)
 
-        // --- 2. デバッグモニター ---
-        val previewParams = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
-            PixelFormat.TRANSLUCENT
-        ).apply { gravity = Gravity.TOP or Gravity.START; x = 16; y = 16 }
-        previewView = LayoutInflater.from(this).inflate(R.layout.layout_floating_preview, null) as ImageView
-        previewView.visibility = View.GONE
-        windowManager.addView(previewView, previewParams)
-
-        // --- 3. 実況テキストエリア ---
-        val commentaryParams = WindowManager.LayoutParams(
-            200.toPx(),
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.TOP or Gravity.END
-            x = prefs.getInt("comm_x", 0)
-            y = prefs.getInt("comm_y", 0)
-        }
-        commentaryView = LayoutInflater.from(this).inflate(R.layout.layout_floating_commentary, null)
-        tvCommentary = commentaryView.findViewById(R.id.tv_floating_commentary)
-        windowManager.addView(commentaryView, commentaryParams)
-
-        // --- 4. 操作ボタン ---
-        val controlParams = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.BOTTOM or Gravity.END
-            x = prefs.getInt("ctrl_x", 8)
-            y = prefs.getInt("ctrl_y", 8)
-        }
-        controlView = LayoutInflater.from(this).inflate(R.layout.layout_floating_jemi, null)
-        windowManager.addView(controlView, controlParams)
-
-        // ボタン設定
-        controlView.findViewById<Button>(R.id.btn_floating_toggle_preview).apply {
-            if (isDebugMode) visibility = View.VISIBLE
-            setOnClickListener { previewView.visibility = if (previewView.visibility == View.VISIBLE) View.GONE else View.VISIBLE }
+        // 💡 モードに合わせてUIを展開するよっ！
+        if (isSingleMode) {
+            setupSingleModeUI()
+        } else {
+            setupDualModeCockpitUI()
         }
 
-        btnCapture = controlView.findViewById(R.id.btn_floating_capture)
-        btnCapture.setOnClickListener {
-            if (isGeminiThinking || System.currentTimeMillis() - lastCaptureTime < 10000) {
-                Toast.makeText(this, "ジェミ、まだ考え中だよっ🌸", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
-            if (imageBuffer.isEmpty()) return@setOnClickListener
-            val gatchanko = createGatchankoBitmap(imageBuffer.toList())
-            if (gatchanko != null) {
-                lastCaptureTime = System.currentTimeMillis()
-
-                // 💡 古いプレビュー画像を捨てて、新しいものを覚えるよっ
-                currentPreviewBitmap?.recycle()
-                currentPreviewBitmap = gatchanko
-
-                previewView.setImageBitmap(gatchanko)
-
-                updateCaptureButtonState() // 💡 撮影直後にボタンを砂時計に変えるよっ
-                getJemiCommentary(gatchanko)
-            }
-        }
-
-        controlView.findViewById<Button>(R.id.btn_floating_close).setOnClickListener {
-            startActivity(Intent(this, MainActivity::class.java).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT) })
-            stopSelf()
-        }
-
-        setupDraggable(recognitionFrameView, frameParams, true, false, true, { updateCropCache(); saveCoords("frame", frameParams) })
-        setupDraggable(controlView, controlParams, false, true, false, { saveCoords("ctrl", controlParams) })
-        setupDraggable(commentaryView, commentaryParams, true, false, false, { saveCoords("comm", commentaryParams) })
+        // 共通の設定
+        setupDraggable(recognitionFrameView, frameParams, mainWindowManager, true, false, true) { updateCropCache(); saveCoords("frame", frameParams) }
 
         startForegroundService()
         handler.postDelayed({ updateCropCache() }, 500)
     }
 
-    // 💡 ボタンの見た目（クールタイム・思考中）を賢く管理するメソッドだよっ
+    @SuppressLint("InflateParams")
+    private fun setupSingleModeUI() {
+        Log.d("Jemi-Live", "📱 1画面モード（従来レイアウト）で起動するよっ！")
+
+        // --- デバッグモニター ---
+        val previewParams = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+            PixelFormat.TRANSLUCENT
+        ).apply { gravity = Gravity.TOP or Gravity.START; x = 16; y = 16 }
+        singlePreviewView = LayoutInflater.from(this).inflate(R.layout.layout_floating_preview, null)
+        previewView = singlePreviewView as ImageView
+        previewView.visibility = View.GONE
+        uiWindowManager.addView(singlePreviewView, previewParams)
+
+        // --- 実況テキストエリア ---
+        val commentaryParams = WindowManager.LayoutParams(
+            200.toPx(), WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            PixelFormat.TRANSLUCENT
+        ).apply { gravity = Gravity.TOP or Gravity.END; x = prefs.getInt("comm_x", 0); y = prefs.getInt("comm_y", 0) }
+        singleCommentaryView = LayoutInflater.from(this).inflate(R.layout.layout_floating_commentary, null)
+        tvCommentary = singleCommentaryView!!.findViewById(R.id.tv_floating_commentary)
+        uiWindowManager.addView(singleCommentaryView, commentaryParams)
+
+        // --- 操作ボタン ---
+        val controlParams = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            PixelFormat.TRANSLUCENT
+        ).apply { gravity = Gravity.BOTTOM or Gravity.END; x = prefs.getInt("ctrl_x", 8); y = prefs.getInt("ctrl_y", 8) }
+        singleControlView = LayoutInflater.from(this).inflate(R.layout.layout_floating_jemi, null)
+        uiWindowManager.addView(singleControlView, controlParams)
+
+        // ボタンの機能設定
+        btnCapture = singleControlView!!.findViewById(R.id.btn_floating_capture)
+        singleControlView!!.findViewById<Button>(R.id.btn_floating_toggle_preview).apply {
+            if (isDebugMode) visibility = View.VISIBLE
+            setOnClickListener { previewView.visibility = if (previewView.visibility == View.VISIBLE) View.GONE else View.VISIBLE }
+        }
+        setupButtonActions(singleControlView!!.findViewById(R.id.btn_floating_close))
+
+        // ドラッグ移動の設定
+        setupDraggable(singleControlView!!, controlParams, uiWindowManager, false, true, false) { saveCoords("ctrl", controlParams) }
+        setupDraggable(singleCommentaryView!!, commentaryParams, uiWindowManager, true, false, false) { saveCoords("comm", commentaryParams) }
+    }
+
+    @SuppressLint("InflateParams")
+    private fun setupDualModeCockpitUI() {
+        Log.d("Jemi-Live", "📺 2画面モード（専用コックピット）で起動するよっ！")
+
+        // サブ画面全体を覆う専用レイアウトを展開！ドラッグは不要だよっ🌸
+        val cockpitParams = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.CENTER
+        }
+
+        dualCockpitView = LayoutInflater.from(this).inflate(R.layout.layout_cockpit_dashboard, null)
+        tvCommentary = dualCockpitView!!.findViewById(R.id.tv_cockpit_commentary)
+        previewView = dualCockpitView!!.findViewById(R.id.iv_cockpit_preview)
+        btnCapture = dualCockpitView!!.findViewById(R.id.btn_cockpit_capture)
+        val btnClose = dualCockpitView!!.findViewById<Button>(R.id.btn_cockpit_close)
+
+        uiWindowManager.addView(dualCockpitView, cockpitParams)
+
+        // コックピット用のボタン機能を設定
+        setupButtonActions(btnClose)
+    }
+
+    private fun setupButtonActions(btnClose: Button) {
+        btnCapture.setOnClickListener {
+            if (isGeminiThinking || System.currentTimeMillis() - lastCaptureTime < 10000) {
+                Toast.makeText(this, "ジェミ、まだ考え中だよっ🌸", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            if (imageBuffer.isEmpty()) {
+                // 💡 画像がまだ無い時に無反応にならないようにお知らせ（Toast）を追加したよっ！
+                Toast.makeText(this, "まだ画像が撮れてないよぉ💦ちょっとだけ待ってね！", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            val gatchanko = createGatchankoBitmap(imageBuffer.toList())
+            if (gatchanko != null) {
+                lastCaptureTime = System.currentTimeMillis()
+                currentPreviewBitmap?.recycle()
+                currentPreviewBitmap = gatchanko
+                previewView.setImageBitmap(gatchanko)
+                updateCaptureButtonState()
+                getJemiCommentary(gatchanko)
+            }
+        }
+
+        btnClose.setOnClickListener {
+            startActivity(Intent(this, MainActivity::class.java).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT) })
+            stopSelf()
+        }
+    }
+
     private fun updateCaptureButtonState() {
         if (!::btnCapture.isInitialized) return
-
         val timeSinceLastCapture = System.currentTimeMillis() - lastCaptureTime
         val isCoolingDown = timeSinceLastCapture < 10000
 
         if (isGeminiThinking || isCoolingDown) {
-            // 考え中、またはクールタイム中ならボタンをロック
             btnCapture.isEnabled = false
             btnCapture.text = "⏳"
             btnCapture.alpha = 0.5f
-
-            // もしクールタイム待ちなら、時間が来たらもう一度状態をチェックするよ
             if (isCoolingDown) {
                 val remainingTime = 10000 - timeSinceLastCapture
                 handler.postDelayed({ updateCaptureButtonState() }, remainingTime + 50)
             }
         } else {
-            // 準備完了！
             btnCapture.isEnabled = true
             btnCapture.text = "📸"
             btnCapture.alpha = 1.0f
@@ -246,7 +300,7 @@ class JemiCaptureService : Service() {
     }
 
     @SuppressLint("ClickableViewAccessibility")
-    private fun setupDraggable(view: View, params: WindowManager.LayoutParams, isTop: Boolean, isBottom: Boolean, isLeft: Boolean, onMoved: () -> Unit) {
+    private fun setupDraggable(view: View, params: WindowManager.LayoutParams, targetWindowManager: WindowManager, isTop: Boolean, isBottom: Boolean, isLeft: Boolean, onMoved: () -> Unit) {
         var initialX = 0; var initialY = 0; var initialTouchX = 0f; var initialTouchY = 0f
         view.setOnTouchListener { v, event ->
             when (event.action) {
@@ -259,7 +313,7 @@ class JemiCaptureService : Service() {
                     if (isLeft) params.x = initialX + dx else params.x = initialX - dx
                     if (isTop) params.y = initialY + dy
                     if (isBottom) params.y = initialY - dy
-                    windowManager.updateViewLayout(v, params); onMoved(); true
+                    targetWindowManager.updateViewLayout(v, params); onMoved(); true
                 }
                 else -> false
             }
@@ -284,7 +338,7 @@ class JemiCaptureService : Service() {
 
     private fun setupCapture() {
         val metrics = DisplayMetrics()
-        windowManager.defaultDisplay.getRealMetrics(metrics)
+        mainWindowManager.defaultDisplay.getRealMetrics(metrics)
         imageReader = ImageReader.newInstance(metrics.widthPixels, metrics.heightPixels, PixelFormat.RGBA_8888, 2)
         virtualDisplay = mediaProjection?.createVirtualDisplay("JemiCapture", metrics.widthPixels, metrics.heightPixels, metrics.densityDpi, DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, imageReader?.surface, null, null)
         startAutoCaptureTimer()
@@ -316,21 +370,18 @@ class JemiCaptureService : Service() {
         val out = java.io.ByteArrayOutputStream()
         bitmap.compress(Bitmap.CompressFormat.JPEG, 60, out)
         val jpeg = out.toByteArray()
-
         Log.d("Jemi-Live", "📊 送信用JPEG作成完了: ${jpeg.size / 1024} KB")
-
-        isGeminiThinking = true // 💡 思考開始！
+        isGeminiThinking = true
 
         if (isDebugMode) {
-            val dummyText = "ヨチオさん、デバッグモード復活だよっ！🚀 ログもしっかり出てるかな？🌸"
+            val dummyText = "ヨチオさん、デバッグモード復活だよっ！🚀 サブ画面に表示されてるかな？🌸"
             serviceScope.launch {
-                delay(2000) // 思考中を演出
+                delay(2000)
                 tvCommentary.text = dummyText
                 jemiVoice.speak(dummyText)
                 Log.d("Jemi-Live", "🎤 [DEBUG] ジェミの実況: $dummyText")
-
-                isGeminiThinking = false // 💡 思考終了
-                updateCaptureButtonState() // ボタンの状態を更新
+                isGeminiThinking = false
+                updateCaptureButtonState()
             }
             return
         }
@@ -358,11 +409,8 @@ class JemiCaptureService : Service() {
             } catch (e: Exception) {
                 Log.e("Jemi-Live", "Gemini Error", e)
             } finally {
-                // 💡 API通信が終わったらフラグを戻してボタンを更新するよっ
                 isGeminiThinking = false
-                withContext(Dispatchers.Main) {
-                    updateCaptureButtonState()
-                }
+                withContext(Dispatchers.Main) { updateCaptureButtonState() }
             }
         }
     }
@@ -385,7 +433,10 @@ class JemiCaptureService : Service() {
     private fun startAutoCaptureTimer() {
         autoCaptureJob = serviceScope.launch {
             while (isActive) {
-                if (previewView.visibility != View.VISIBLE) {
+                // 💡 【大修正ポイント！】
+                // 1画面モードでプレビューが開いている時「だけ」撮影を止めるよ！
+                // 2画面モードなら、プレビューは下画面にあってゲームの邪魔をしないから、常に撮影してOK！
+                if (!isSingleMode || previewView.visibility != View.VISIBLE) {
                     isCaptureRequested = true
                 } else {
                     Log.d("Jemi-Capture", "⏸ プレビュー表示中のため、自動撮影を一時停止してるよっ！")
@@ -403,13 +454,16 @@ class JemiCaptureService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        if (::controlView.isInitialized) windowManager.removeView(controlView)
-        if (::commentaryView.isInitialized) windowManager.removeView(commentaryView)
-        if (::previewView.isInitialized) windowManager.removeView(previewView)
-        if (::recognitionFrameView.isInitialized) windowManager.removeView(recognitionFrameView)
+        singleControlView?.let { uiWindowManager.removeView(it) }
+        singleCommentaryView?.let { uiWindowManager.removeView(it) }
+        singlePreviewView?.let { uiWindowManager.removeView(it) }
+        dualCockpitView?.let { uiWindowManager.removeView(it) }
+
+        if (::recognitionFrameView.isInitialized) mainWindowManager.removeView(recognitionFrameView)
+
         virtualDisplay?.release(); imageReader?.close(); mediaProjection?.stop(); autoCaptureJob?.cancel()
         synchronized(imageBuffer) { imageBuffer.forEach { it.recycle() }; imageBuffer.clear() }
-        currentPreviewBitmap?.recycle() // 💡 アプリ終了時に忘れずにお片付け！
+        currentPreviewBitmap?.recycle()
         if (::jemiVoice.isInitialized) jemiVoice.shutdown(); serviceScope.cancel()
     }
 

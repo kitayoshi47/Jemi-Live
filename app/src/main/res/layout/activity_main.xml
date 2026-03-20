@@ -105,6 +105,29 @@
             <RadioButton android:id="@+id/rb_preset_idle" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="💤 省エネ (放置・見守り)" android:textStyle="bold"/>
         </RadioGroup>
 
+        <!-- 📺 画面モード選択 -->
+        <TextView
+            android:id="@+id/tv_display_mode_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="▼ 画面モードはどっちにする？"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/rg_presets" />
+
+        <RadioGroup
+            android:id="@+id/rg_display_mode"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:padding="8dp"
+            app:layout_constraintTop_toBottomOf="@id/tv_display_mode_label">
+            <RadioButton android:id="@+id/rb_display_dual" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📺 2画面モード (Thor専用・UI分離)" android:textStyle="bold" android:checked="true"/>
+            <RadioButton android:id="@+id/rb_display_single" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📱 1画面モード (従来の一体型オーバーレイ)" android:textStyle="bold"/>
+        </RadioGroup>
+
         <!-- 🚀 開始ボタン -->
         <Button
             android:id="@+id/btn_start_live"
@@ -114,7 +137,7 @@
             android:text="LIVE開始っ！🚀"
             android:textSize="18sp"
             android:textStyle="bold"
-            app:layout_constraintTop_toBottomOf="@id/rg_presets" />
+            app:layout_constraintTop_toBottomOf="@id/rg_display_mode" />
 
         <TextView
             android:id="@+id/tv_status"
