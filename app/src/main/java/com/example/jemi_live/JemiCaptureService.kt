@@ -48,10 +48,10 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * JemiCaptureService (v2.9.2 - Model Name Reverted & Stability Fix)
- * - モデル名を元の「gemini-3.1-flash-lite-preview」に差し戻し
- * - おまじない(systemInstruction)とAPIキーの確実な反映を保証
- * - 不必要なコード整理を排除し、現在の正常動作環境を維持
+ * JemiCaptureService (v2.9.5 - API Logging & Status Icons)
+ * - Gemini APIの応答時間(latency)をログ出力。
+ * - 思考中「🤔」とクールタイム「⌛️」のアイコンを使い分け。
+ * - モデル名：gemini-3.1-flash-lite-preview を維持。
  */
 class JemiCaptureService : Service() {
     private lateinit var mainWindowManager: WindowManager
@@ -89,7 +89,7 @@ class JemiCaptureService : Service() {
     private var generativeModel: GenerativeModel? = null
     private var customOmajinai: String = ""
 
-    private var isDebugMode = true
+    private var isDebugMode = false //true
     private var isSingleMode = false
     private var captureAreaMode = "manual"
     private var isFrameAdjustMode = false
@@ -229,8 +229,17 @@ class JemiCaptureService : Service() {
         btnCapture = singleControlView!!.findViewById(R.id.btn_floating_capture)
         val btnEdit = singleControlView!!.findViewById<Button>(R.id.btn_floating_edit_frame)
         val btnClose = singleControlView!!.findViewById<Button>(R.id.btn_floating_close)
+        val btnTogglePreview = singleControlView!!.findViewById<Button>(R.id.btn_floating_toggle_preview)
+
         if (captureAreaMode != "manual") btnEdit.visibility = View.GONE
         btnEdit.setOnClickListener { toggleFrameAdjustMode() }
+
+        btnTogglePreview?.setOnClickListener {
+            if (singlePreviewView != null) {
+                singlePreviewView!!.visibility = if (singlePreviewView!!.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+            }
+        }
+
         setupButtonActions(btnClose)
         uiWindowManager.addView(singleControlView, controlParams)
 
@@ -312,9 +321,12 @@ class JemiCaptureService : Service() {
     private fun setupButtonActions(btnClose: Button) {
         btnCapture.setOnClickListener {
             if (isGeminiThinking || System.currentTimeMillis() - lastCaptureTime < 10000) {
-                Toast.makeText(this, "考え中だよっ🌸", Toast.LENGTH_SHORT).show(); return@setOnClickListener
+                Toast.makeText(this, "ジェミ、まだ考え中か休憩中だよぉ🌸", Toast.LENGTH_SHORT).show(); return@setOnClickListener
             }
-            if (imageBuffer.isEmpty()) { Toast.makeText(this, "画像がまだ撮れてないよぉ💦", Toast.LENGTH_SHORT).show(); return@setOnClickListener }
+            if (imageBuffer.isEmpty()) {
+                Toast.makeText(this, "画像がまだ撮れてないよぉ💦少し待ってね！", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
             val g = createGatchankoBitmap(imageBuffer.toList()) ?: return@setOnClickListener
             lastCaptureTime = System.currentTimeMillis(); currentPreviewBitmap?.recycle(); currentPreviewBitmap = g
             previewView.setImageBitmap(g); updateCaptureButtonState(); getJemiCommentary(g)
@@ -325,14 +337,23 @@ class JemiCaptureService : Service() {
         }
     }
 
+    // 💡 アイコンの出し分けロジックを更新したよっ！
     private fun updateCaptureButtonState() {
         if (!::btnCapture.isInitialized) return
         val t = System.currentTimeMillis() - lastCaptureTime
         val cooling = t < 10000
+
         btnCapture.isEnabled = !isGeminiThinking && !cooling
-        btnCapture.text = if (isGeminiThinking || cooling) "⏳" else "📸"
+
+        // 💡 思考中を「🤔」、クールタイムを「⌛️」に分けたよ！
+        btnCapture.text = when {
+            isGeminiThinking -> "🤔"
+            cooling -> "⌛️"
+            else -> "📸"
+        }
+
         btnCapture.alpha = if (btnCapture.isEnabled) 1.0f else 0.5f
-        if (cooling) handler.postDelayed({ updateCaptureButtonState() }, 10000 - t + 50)
+        if (cooling && !isGeminiThinking) handler.postDelayed({ updateCaptureButtonState() }, 10000 - t + 50)
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -391,7 +412,8 @@ class JemiCaptureService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         singleControlView?.let { uiWindowManager.removeView(it) }; singleCommentaryView?.let { uiWindowManager.removeView(it) }
-        singlePreviewView?.let { uiWindowManager.removeView(it) }; dualCockpitView?.let { uiWindowManager.removeView(it) }
+        singlePreviewView?.let { uiWindowManager.removeView(it) }
+        dualCockpitView?.let { uiWindowManager.removeView(it) }
         if (::recognitionFrameView.isInitialized) mainWindowManager.removeView(recognitionFrameView)
         virtualDisplay?.release(); imageReader?.close(); mediaProjection?.stop(); autoCaptureJob?.cancel()
         synchronized(imageBuffer) { imageBuffer.forEach { it.recycle() }; imageBuffer.clear() }
@@ -405,9 +427,15 @@ class JemiCaptureService : Service() {
         val o = java.io.ByteArrayOutputStream(); b.compress(Bitmap.CompressFormat.JPEG, 60, o)
         val j = o.toByteArray()
         Log.d("Jemi-Live", "📊 送信用JPEG作成完了: ${j.size / 1024} KB")
+
         isGeminiThinking = true
+        updateCaptureButtonState()
+
+        val startTime = System.currentTimeMillis() // 💡 通信開始時間を記録
+        Log.d("Jemi-API", "🚀 Gemini API 送信開始...")
+
         if (isDebugMode) {
-            val d = "ヨチオさん、モデル名もしっかり戻したよっ！おまじないもバッチリ効いてるはず🌸"
+            val d = "ヨチオさん、1画面モードのプレビュー切り替えも直したよっ🌸"
             serviceScope.launch {
                 delay(2000); tvCommentary.text = d; jemiVoice.speak(d);
                 Log.d("Jemi-Live", "🎤 [DEBUG]: $d")
@@ -421,11 +449,19 @@ class JemiCaptureService : Service() {
                 val p = "最新の画像状況を見て、簡潔にテンション高く実況して！\n【ルール】最大3行、100文字以内！画像は2x2タイルの時系列だよ。"
                 val res = model.generateContent(content { blob("image/jpeg", j); text(p) })
                 val rep = res.text ?: "読み取れなかったみたい💦"
+                val latency = System.currentTimeMillis() - startTime // 💡 経過時間を計算
+
                 withContext(Dispatchers.Main) {
                     tvCommentary.text = rep; jemiVoice.speak(rep)
+                    Log.d("Jemi-API", "✅ Gemini API 受信成功！ [応答時間: ${latency}ms]")
                     Log.d("Jemi-Live", "🎤 実況: $rep")
                 }
-            } catch (e: Exception) { Log.e("Jemi-Live", "Error", e) } finally { isGeminiThinking = false; withContext(Dispatchers.Main) { updateCaptureButtonState() } }
+            } catch (e: Exception) {
+                Log.e("Jemi-API", "❌ Gemini API 通信エラー", e)
+                withContext(Dispatchers.Main) { Toast.makeText(this@JemiCaptureService, "実況エラーになっちゃった💦", Toast.LENGTH_SHORT).show() }
+            } finally {
+                isGeminiThinking = false; withContext(Dispatchers.Main) { updateCaptureButtonState() }
+            }
         }
     }
 }
