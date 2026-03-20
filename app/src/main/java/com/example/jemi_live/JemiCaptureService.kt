@@ -42,6 +42,7 @@ class JemiCaptureService : Service() {
     private lateinit var windowManager: WindowManager
     private lateinit var floatingView: View
     private lateinit var previewView: ImageView
+    private var lastCaptureTime = 0L
     private var mediaProjection: MediaProjection? = null
     private var virtualDisplay: VirtualDisplay? = null
     private var imageReader: ImageReader? = null
@@ -69,7 +70,7 @@ class JemiCaptureService : Service() {
     )
 
     // 今はまだテストだからtrueにしておくねっ！
-    private val isDebugMode = false //true
+    private val isDebugMode = true
 
     @SuppressLint("InflateParams", "ClickableViewAccessibility")
     override fun onCreate() {
@@ -129,15 +130,37 @@ class JemiCaptureService : Service() {
         // 📸 撮影ボタンを押した時の処理
         val btnCapture = floatingView.findViewById<Button>(R.id.btn_floating_capture)
         btnCapture.setOnClickListener {
-            if (imageBuffer.isEmpty()) return@setOnClickListener
+            // 1. まず、今ボタンを押した「今の時間」を確認するよ！
+            val currentTime = System.currentTimeMillis()
 
-            val gatchankoBitmap = createGatchankoBitmap(imageBuffer.toList()) // [cite: 8]
+            // 2. もし、最後に撮った時間からまだ10秒（10000ミリ秒）経ってなかったら…
+            if (currentTime - lastCaptureTime < 10000) {
+                // 「ちょっと待ってね」って優しく教えてあげるの🌸
+                android.widget.Toast.makeText(this, "ジェミは今、前の実況を考え中だよっ！あと少し待ってね🌸", android.widget.Toast.LENGTH_SHORT).show()
+                return@setOnClickListener // ここで処理をストップして、下には行かないようにするよ
+            }
+
+            // 3. ここから下は今まで通り！写真が貯まってるかチェック！
+            if (imageBuffer.isEmpty()) {
+                android.widget.Toast.makeText(this, "まだ写真が貯まってないよぉ💦", android.widget.Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            // 4. 職人さんにガッチャンコしてもらう！
+            val gatchankoBitmap = createGatchankoBitmap(imageBuffer.toList())
+
             if (gatchankoBitmap != null) {
-                // 📸ボタンを押した時だけは、一時的にモニターに映してあげるっ！
+                // ⭕️ 無事に撮れたら、今の時間を「最後に撮った時間」としてメモ帳に書き込むよ！
+                lastCaptureTime = currentTime
+
                 if (isDebugMode) {
                     previewView.setImageBitmap(gatchankoBitmap)
                     previewView.visibility = View.VISIBLE
+                } else {
+                    previewView.visibility = View.GONE
                 }
+
+                // ジェミの脳みそに画像を送る！
                 getJemiCommentary(gatchankoBitmap)
             }
         }
