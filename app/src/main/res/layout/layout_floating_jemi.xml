@@ -8,18 +8,16 @@
     android:gravity="center"
     android:elevation="4dp">
 
-    <!-- 🖼️ プレビュー切り替え -->
+    <!-- 🔧 枠調整モード切り替え -->
     <Button
-        android:id="@+id/btn_floating_toggle_preview"
+        android:id="@+id/btn_floating_edit_frame"
         android:layout_width="44dp"
         android:layout_height="44dp"
-        android:text="🖼️"
+        android:text="🔧"
         android:textSize="16sp"
         android:background="@drawable/bg_action_button_blue"
-        android:visibility="gone"
         android:stateListAnimator="@null" />
 
-    <!-- 📸 撮影＆実況 -->
     <Button
         android:id="@+id/btn_floating_capture"
         android:layout_width="52dp"
@@ -30,7 +28,6 @@
         android:background="@drawable/bg_action_button_dark"
         android:stateListAnimator="@null" />
 
-    <!-- ❌ 終了 -->
     <Button
         android:id="@+id/btn_floating_close"
         android:layout_width="44dp"
@@ -39,5 +36,4 @@
         android:textSize="16sp"
         android:background="@drawable/bg_action_button_red"
         android:stateListAnimator="@null" />
-
 </LinearLayout>

@@ -1,36 +1,27 @@
 package com.example.jemi_live
 
-import android.Manifest
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Bundle
-import android.widget.RadioGroup
-import android.widget.RadioButton
 import android.widget.Button
 import android.widget.EditText
-import android.widget.Toast
+import android.widget.RadioButton
+import android.widget.RadioGroup
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.net.toUri
 
-/**
- * MainActivity (v2.6 - Build Fix)
- * - ユーザー設定（APIキー、おまじない）の永続化
- * - 動作モード・ジャンルの選択ロジック統合
- * - 参照エラー修正（R.id.rg_modes 等の不整合を解消）
- */
 class MainActivity : AppCompatActivity() {
     private lateinit var etApiKey: EditText
     private lateinit var etOmajinai: EditText
     private lateinit var rgModes: RadioGroup
     private lateinit var rgPresets: RadioGroup
     private lateinit var rgDisplayMode: RadioGroup
+    private lateinit var rgCaptureArea: RadioGroup
     private lateinit var mediaProjectionManager: MediaProjectionManager
 
-    // スクリーンキャプチャの許可ダイアログからの戻り
     private val captureLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
             val prefs = getSharedPreferences("JemiSettings", Context.MODE_PRIVATE)
@@ -40,17 +31,12 @@ class MainActivity : AppCompatActivity() {
             val selectedModeId = rgModes.checkedRadioButtonId
             val selectedPresetId = rgPresets.checkedRadioButtonId
             val selectedDisplayModeId = rgDisplayMode.checkedRadioButtonId
+            val selectedCaptureAreaId = rgCaptureArea.checkedRadioButtonId
             val isSingleMode = selectedDisplayModeId == R.id.rb_display_single
 
-            // 💡 新しく追加した撮影エリアの選択状態も取得するよっ！
-            val rgCaptureArea = findViewById<RadioGroup>(R.id.rg_capture_area)
-            val selectedCaptureAreaId = rgCaptureArea.checkedRadioButtonId
-
-            // 選択されたテキストを取得するよ
             val modeText = findViewById<RadioButton>(selectedModeId)?.text?.toString() ?: ""
             val presetText = findViewById<RadioButton>(selectedPresetId)?.text?.toString() ?: ""
 
-            // サービスを起動して設定を渡すよっ🌸
             val serviceIntent = Intent(this, JemiCaptureService::class.java).apply {
                 putExtra("RESULT_CODE", result.resultCode)
                 putExtra("RESULT_DATA", result.data)
@@ -60,7 +46,7 @@ class MainActivity : AppCompatActivity() {
                 putExtra("SELECTED_PRESET", presetText)
             }
 
-            // 開始時に設定を保存！
+            // 💡 確実に全ての情報を保存してからサービスを呼ぶよっ！
             prefs.edit().apply {
                 putString("api_key", apiKey)
                 putString("omajinai", omajinai)
@@ -68,16 +54,15 @@ class MainActivity : AppCompatActivity() {
                 putInt("last_preset_id", selectedPresetId)
                 putInt("last_display_mode_id", selectedDisplayModeId)
                 putBoolean("is_single_display_mode", isSingleMode)
-                // 💡 これを追加！ジェミに選んだ撮影エリアをしっかり覚えさせるよっ！
                 putInt("last_capture_area_id", selectedCaptureAreaId)
                 apply()
             }
 
-            startForegroundService(serviceIntent)
-            Toast.makeText(this, "実況準備に入るねっ！いってらっしゃい🌸", Toast.LENGTH_SHORT).show()
-            finish() // 準備画面を閉じてゲームに集中！
-        } else {
-            Toast.makeText(this, "画面が見えないと実況できないよぉ……🥹", Toast.LENGTH_SHORT).show()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(serviceIntent)
+            } else {
+                startService(serviceIntent)
+            }
         }
     }
 
@@ -85,85 +70,44 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // Viewの紐付け（activity_main.xml の ID と一致させているよ）
         etApiKey = findViewById(R.id.et_api_key)
         etOmajinai = findViewById(R.id.et_omajinai)
         rgModes = findViewById(R.id.rg_modes)
         rgPresets = findViewById(R.id.rg_presets)
         rgDisplayMode = findViewById(R.id.rg_display_mode)
+        rgCaptureArea = findViewById(R.id.rg_capture_area)
         mediaProjectionManager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
 
-        // 権限の準備
         setupPermissions()
 
-        // 💾 保存された設定を復元
+        // 💡 前回の設定を復元するよっ
         val prefs = getSharedPreferences("JemiSettings", Context.MODE_PRIVATE)
         etApiKey.setText(prefs.getString("api_key", ""))
-        etOmajinai.setText(prefs.getString("omajinai", "23歳の女子大生らしく明るく元気に応援して！"))
+        etOmajinai.setText(prefs.getString("omajinai", ""))
 
-        // 前回の選択状態を復元（IDが存在する場合のみ）
         val lastModeId = prefs.getInt("last_mode_id", -1)
-        if (lastModeId != -1) {
-            try {
-                rgModes.check(lastModeId)
-            } catch (e: Exception) {
-                // IDが変わっている場合はデフォルトを選択
-            }
-        }
+        if (lastModeId != -1) try { rgModes.check(lastModeId) } catch (e: Exception) {}
 
         val lastPresetId = prefs.getInt("last_preset_id", -1)
-        if (lastPresetId != -1) {
-            try {
-                rgPresets.check(lastPresetId)
-            } catch (e: Exception) {
-                // IDが変わっている場合はデフォルトを選択
-            }
-        }
+        if (lastPresetId != -1) try { rgPresets.check(lastPresetId) } catch (e: Exception) {}
 
         val lastDisplayModeId = prefs.getInt("last_display_mode_id", -1)
-        if (lastDisplayModeId != -1) {
-            try {
-                rgDisplayMode.check(lastDisplayModeId)
-            } catch (e: Exception) {
-            }
-        }
+        if (lastDisplayModeId != -1) try { rgDisplayMode.check(lastDisplayModeId) } catch (e: Exception) {}
 
-        // 💡 これも追加！準備室を開いた時に、前回選んだ撮影エリアのボタンをポチッと復元するよっ！
         val lastCaptureAreaId = prefs.getInt("last_capture_area_id", -1)
-        if (lastCaptureAreaId != -1) {
-            try {
-                findViewById<RadioGroup>(R.id.rg_capture_area).check(lastCaptureAreaId)
-            } catch (e: Exception) {}
-        }
+        if (lastCaptureAreaId != -1) try { rgCaptureArea.check(lastCaptureAreaId) } catch (e: Exception) {}
 
-        // 🚀 LIVE開始ボタン
         findViewById<Button>(R.id.btn_start_live).setOnClickListener {
-            if (etApiKey.text.isNullOrEmpty()) {
-                Toast.makeText(this, "APIキーを入れてねっ💦", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
-
-            val modeText = findViewById<RadioButton>(rgModes.checkedRadioButtonId)?.text ?: "未選択"
-            val presetText = findViewById<RadioButton>(rgPresets.checkedRadioButtonId)?.text ?: "未選択"
-            Toast.makeText(this, "「$modeText」と「$presetText」で開始するねっ！", Toast.LENGTH_SHORT).show()
-
-            captureLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
+            val intent = mediaProjectionManager.createScreenCaptureIntent()
+            captureLauncher.launch(intent)
         }
     }
 
     private fun setupPermissions() {
-        // オーバーレイ権限
-        if (!android.provider.Settings.canDrawOverlays(this)) {
-            val intent = Intent(
-                android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                "package:$packageName".toUri()
-            )
-            startActivity(intent)
-        }
-
-        // 通知権限（Android 13以上）
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 101)
+            if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 100)
+            }
         }
     }
 }

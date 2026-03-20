@@ -7,7 +7,7 @@
     android:padding="12dp"
     android:baselineAligned="false">
 
-    <!-- 📢 左側：実況テキストエリア（広く使うよっ！） -->
+    <!-- 📢 左側：実況テキストエリア -->
     <LinearLayout
         android:layout_width="0dp"
         android:layout_height="match_parent"
@@ -22,19 +22,17 @@
             android:orientation="horizontal"
             android:gravity="center_vertical"
             android:layout_marginBottom="8dp">
-
             <View
-                android:layout_width="10dp"
-                android:layout_height="10dp"
+                android:layout_width="8dp"
+                android:layout_height="8dp"
                 android:background="@drawable/bg_recording_dot"
                 android:layout_marginEnd="8dp"/>
-
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="JEMI-LIVE COCKPIT"
                 android:textColor="#FF88AA"
-                android:textSize="14sp"
+                android:textSize="12sp"
                 android:textStyle="bold"
                 android:letterSpacing="0.1"/>
         </LinearLayout>
@@ -43,20 +41,18 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:fillViewport="true">
-
             <TextView
                 android:id="@+id/tv_cockpit_commentary"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="ヨチオさん、コックピットへようこそっ🌸\nここは2画面モード専用の司令室だよ！"
                 android:textColor="#FFFFFF"
-                android:textSize="16sp"
+                android:textSize="15sp"
                 android:textStyle="bold"
                 android:lineSpacingExtra="4dp"/>
         </ScrollView>
     </LinearLayout>
 
-    <!-- 🎛️ 右側：コントロールパネル（プレビューとボタン） -->
+    <!-- 🎛️ 右側：コントロールパネル -->
     <LinearLayout
         android:layout_width="wrap_content"
         android:layout_height="match_parent"
@@ -64,38 +60,50 @@
         android:layout_marginStart="12dp"
         android:gravity="center">
 
-        <!-- プレビュー画像（常に表示させておくよっ！） -->
         <ImageView
             android:id="@+id/iv_cockpit_preview"
-            android:layout_width="120dp"
-            android:layout_height="120dp"
-            android:layout_marginBottom="16dp"
+            android:layout_width="140dp"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
             android:background="#333333"
-            android:scaleType="centerCrop" />
+            android:adjustViewBounds="true"
+            android:scaleType="fitCenter" />
 
+        <!-- 💡 横並びの箱に変更！これで勝手に縦に詰められなくなるよっ🌸 -->
         <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:orientation="horizontal">
+            android:orientation="horizontal"
+            android:gravity="center">
 
             <Button
                 android:id="@+id/btn_cockpit_capture"
-                android:layout_width="64dp"
-                android:layout_height="64dp"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
                 android:text="📸"
-                android:textSize="24sp"
+                android:textSize="20sp"
                 android:background="@drawable/bg_action_button_dark"
-                android:layout_marginEnd="8dp"
+                android:stateListAnimator="@null" />
+
+            <!-- 🔧 枠調整ボタン -->
+            <Button
+                android:id="@+id/btn_cockpit_edit_frame"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:layout_marginStart="8dp"
+                android:text="🔧"
+                android:textSize="16sp"
+                android:background="@drawable/bg_action_button_blue"
                 android:stateListAnimator="@null" />
 
             <Button
                 android:id="@+id/btn_cockpit_close"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:layout_marginStart="8dp"
                 android:text="❌"
-                android:textSize="16sp"
+                android:textSize="14sp"
                 android:background="@drawable/bg_action_button_red"
-                android:layout_gravity="center_vertical"
                 android:stateListAnimator="@null" />
         </LinearLayout>
     </LinearLayout>
