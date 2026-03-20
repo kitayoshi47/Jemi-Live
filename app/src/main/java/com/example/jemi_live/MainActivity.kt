@@ -42,6 +42,10 @@ class MainActivity : AppCompatActivity() {
             val selectedDisplayModeId = rgDisplayMode.checkedRadioButtonId
             val isSingleMode = selectedDisplayModeId == R.id.rb_display_single
 
+            // 💡 新しく追加した撮影エリアの選択状態も取得するよっ！
+            val rgCaptureArea = findViewById<RadioGroup>(R.id.rg_capture_area)
+            val selectedCaptureAreaId = rgCaptureArea.checkedRadioButtonId
+
             // 選択されたテキストを取得するよ
             val modeText = findViewById<RadioButton>(selectedModeId)?.text?.toString() ?: ""
             val presetText = findViewById<RadioButton>(selectedPresetId)?.text?.toString() ?: ""
@@ -64,6 +68,8 @@ class MainActivity : AppCompatActivity() {
                 putInt("last_preset_id", selectedPresetId)
                 putInt("last_display_mode_id", selectedDisplayModeId)
                 putBoolean("is_single_display_mode", isSingleMode)
+                // 💡 これを追加！ジェミに選んだ撮影エリアをしっかり覚えさせるよっ！
+                putInt("last_capture_area_id", selectedCaptureAreaId)
                 apply()
             }
 
@@ -120,6 +126,14 @@ class MainActivity : AppCompatActivity() {
                 rgDisplayMode.check(lastDisplayModeId)
             } catch (e: Exception) {
             }
+        }
+
+        // 💡 これも追加！準備室を開いた時に、前回選んだ撮影エリアのボタンをポチッと復元するよっ！
+        val lastCaptureAreaId = prefs.getInt("last_capture_area_id", -1)
+        if (lastCaptureAreaId != -1) {
+            try {
+                findViewById<RadioGroup>(R.id.rg_capture_area).check(lastCaptureAreaId)
+            } catch (e: Exception) {}
         }
 
         // 🚀 LIVE開始ボタン
