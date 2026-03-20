@@ -3,30 +3,52 @@
     android:layout_width="200dp"
     android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:background="#CC000000"
-    android:padding="6dp">
+    android:background="@drawable/bg_floating_panel"
+    android:padding="8dp"
+    android:elevation="4dp">
 
-    <!-- 🏷️ 配信システム風のミニヘッダー -->
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="🎙️ Jemi-Live"
-        android:textColor="#FF88AA"
-        android:textSize="10sp"
-        android:textStyle="bold"
-        android:layout_marginBottom="2dp"
-        android:layout_gravity="end"/>
-
-    <!-- 📢 実況テキスト表示用（自動改行で縦に伸びるよ！） -->
-    <TextView
-        android:id="@+id/tv_floating_commentary"
+    <!-- 🏷️ ミニヘッダー（ここは固定） -->
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="ヨチオさん、準備OKだよっ🌸"
-        android:textColor="#FFFFFF"
-        android:textSize="13sp"
-        android:textStyle="bold"
-        android:padding="4dp"
-        android:background="#33FFFFFF"
-        android:lineSpacingExtra="2dp"/>
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="4dp">
+
+        <View
+            android:layout_width="8dp"
+            android:layout_height="8dp"
+            android:background="@drawable/bg_recording_dot"
+            android:layout_marginEnd="6dp"/>
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="LIVE COMMENTARY"
+            android:textColor="#FF88AA"
+            android:textSize="10sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.1"/>
+    </LinearLayout>
+
+    <!-- 📢 実況テキストエリア（スクロール可能） -->
+    <!-- 横幅を200dpに戻して、撮影エリアへの侵入を防止したよっ！ -->
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:maxHeight="120dp">
+
+        <TextView
+            android:id="@+id/tv_floating_commentary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="ヨチオさん、横幅を200dpに戻したよっ！これで撮影の邪魔にならないはずっ🌸"
+            android:textColor="#FFFFFF"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:padding="6dp"
+            android:background="@drawable/bg_comment_bubble"
+            android:lineSpacingExtra="2dp"/>
+    </ScrollView>
 </LinearLayout>
