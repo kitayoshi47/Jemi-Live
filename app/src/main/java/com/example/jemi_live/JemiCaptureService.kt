@@ -89,7 +89,7 @@ class JemiCaptureService : Service() {
     private var generativeModel: GenerativeModel? = null
     private var customOmajinai: String = ""
 
-    private var isDebugMode = false //true
+    private var isDebugMode = true
     private var isSingleMode = false
     private var captureAreaMode = "manual"
     private var isFrameAdjustMode = false

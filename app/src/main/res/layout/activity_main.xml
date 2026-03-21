@@ -1,121 +1,86 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:fillViewport="true">
+    android:padding="16dp"
+    android:background="#1E1E1E"> <!-- 💡 ヨチオさんのこだわり、#1E1E1E で固定だねっ！ -->
 
     <androidx.constraintlayout.widget.ConstraintLayout
-        android:id="@+id/main"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:padding="24dp">
+        android:layout_height="wrap_content">
 
         <TextView
             android:id="@+id/tv_title"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Jemi-Live 準備室"
-            android:textSize="26sp"
+            android:text="Jemi-Live 準備室🌸"
+            android:textSize="24sp"
             android:textStyle="bold"
+            android:textColor="#FF88AA"
             app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent" />
 
-        <!-- 🔑 基本設定セクション -->
-        <com.google.android.material.textfield.TextInputLayout
-            android:id="@+id/til_api_key"
-            android:layout_width="match_parent"
+        <!-- 🔑 API Key -->
+        <TextView
+            android:id="@+id/tv_api_key_label"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="24dp"
-            android:hint="Gemini API Key"
-            app:passwordToggleEnabled="true"
-            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
-            app:layout_constraintTop_toBottomOf="@id/tv_title">
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/et_api_key"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textStyle="bold"
-                android:inputType="textPassword" />
-        </com.google.android.material.textfield.TextInputLayout>
+            android:text="▼ Gemini API キー"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:textColor="#FFFFFF"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/tv_title" />
 
-        <com.google.android.material.textfield.TextInputLayout
-            android:id="@+id/til_omajinai"
+        <EditText
+            android:id="@+id/et_api_key"
             android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="AIzaSy..."
+            android:textColor="#FFFFFF"
+            android:textColorHint="#888888"
+            android:inputType="textPassword"
+            android:backgroundTint="#FF88AA"
+            app:layout_constraintTop_toBottomOf="@id/tv_api_key_label" />
+
+        <!-- 💖 おまじない (システムプロンプト) -->
+        <TextView
+            android:id="@+id/tv_omajinai_label"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:hint="ジェミちゃんへのおまじない"
-            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
-            app:layout_constraintTop_toBottomOf="@id/til_api_key">
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/et_omajinai"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textStyle="bold"
-                android:inputType="textMultiLine"
-                android:minLines="2" />
-        </com.google.android.material.textfield.TextInputLayout>
-
-        <!-- 🎙️ 動作モード選択 -->
-        <TextView
-            android:id="@+id/tv_mode_label"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
-            android:text="▼ 動作モードを選んでねっ！"
+            android:text="▼ おまじない（性格・口調）"
             android:textSize="16sp"
             android:textStyle="bold"
+            android:textColor="#FFFFFF"
             app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toBottomOf="@id/til_omajinai" />
+            app:layout_constraintTop_toBottomOf="@id/et_api_key" />
 
-        <RadioGroup
-            android:id="@+id/rg_modes"
+        <EditText
+            android:id="@+id/et_omajinai"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:padding="8dp"
-            app:layout_constraintTop_toBottomOf="@id/tv_mode_label">
-            <RadioButton android:id="@+id/rb_mode_niconico" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="ニコニコモード (賑やかし特化)" android:textStyle="bold" android:checked="true"/>
-            <RadioButton android:id="@+id/rb_mode_subtitle" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="字幕モード (攻略・解説特化)" android:textStyle="bold"/>
-            <RadioButton android:id="@+id/rb_mode_radio" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="ラジオモード (ながら見・定期報告)" android:textStyle="bold"/>
-        </RadioGroup>
+            android:hint="元気に！可愛く！関西弁で！など"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#888888"
+            android:backgroundTint="#FF88AA"
+            app:layout_constraintTop_toBottomOf="@id/tv_omajinai_label" />
 
-        <!-- ⚔️ ジャンル・プリセット -->
-        <TextView
-            android:id="@+id/tv_preset_label"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:text="▼ 今のゲームのジャンルは？"
-            android:textSize="16sp"
-            android:textStyle="bold"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toBottomOf="@id/rg_modes" />
-
-        <RadioGroup
-            android:id="@+id/rg_presets"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:padding="8dp"
-            app:layout_constraintTop_toBottomOf="@id/tv_preset_label">
-            <RadioButton android:id="@+id/rb_preset_action" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="⚔️ アクション (1秒間隔・ノリ重視)" android:textStyle="bold" android:checked="true"/>
-            <RadioButton android:id="@+id/rb_preset_rpg" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📖 RPG (15秒間隔・文脈重視)" android:textStyle="bold"/>
-            <RadioButton android:id="@+id/rb_preset_idle" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="💤 省エネ (放置・見守り)" android:textStyle="bold"/>
-        </RadioGroup>
-
-        <!-- 📺 画面モード選択 -->
+        <!-- 📺 表示モード -->
         <TextView
             android:id="@+id/tv_display_mode_label"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="20dp"
-            android:text="▼ 画面モードはどっちにする？"
+            android:text="▼ 画面モードはどうする？"
             android:textSize="16sp"
             android:textStyle="bold"
+            android:textColor="#FFFFFF"
             app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toBottomOf="@id/rg_presets" />
+            app:layout_constraintTop_toBottomOf="@id/et_omajinai" />
 
         <RadioGroup
             android:id="@+id/rg_display_mode"
@@ -124,10 +89,12 @@
             android:layout_marginTop="8dp"
             android:padding="8dp"
             app:layout_constraintTop_toBottomOf="@id/tv_display_mode_label">
-            <RadioButton android:id="@+id/rb_display_dual" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📺 2画面モード (Thor専用・UI分離)" android:textStyle="bold" android:checked="true"/>
-            <RadioButton android:id="@+id/rb_display_single" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📱 1画面モード (従来の一体型オーバーレイ)" android:textStyle="bold"/>
+            <!-- 💡 ラジオボタンも文字色を白(#FFFFFF)に固定して、万全を期したよぉ！ -->
+            <RadioButton android:id="@+id/rb_display_dual" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📺 2画面コックピット（Thor推奨）" android:textColor="#FFFFFF" android:textStyle="bold" android:checked="true"/>
+            <RadioButton android:id="@+id/rb_display_single" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📱 1画面フローティング" android:textColor="#FFFFFF" android:textStyle="bold"/>
         </RadioGroup>
 
+        <!-- 📐 撮影エリアの設定 -->
         <TextView
             android:id="@+id/tv_capture_area_label"
             android:layout_width="wrap_content"
@@ -136,6 +103,7 @@
             android:text="▼ 撮影する範囲はどうする？"
             android:textSize="16sp"
             android:textStyle="bold"
+            android:textColor="#FFFFFF"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toBottomOf="@id/rg_display_mode" />
 
@@ -146,9 +114,9 @@
             android:layout_marginTop="8dp"
             android:padding="8dp"
             app:layout_constraintTop_toBottomOf="@id/tv_capture_area_label">
-            <RadioButton android:id="@+id/rb_area_manual" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="⬛️ 手動（緑の枠で合わせる）" android:textStyle="bold" android:checked="true"/>
-            <RadioButton android:id="@+id/rb_area_4_3" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="🟦 中央 4:3（レトロゲーム向け）" android:textStyle="bold"/>
-            <RadioButton android:id="@+id/rb_area_16_9" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="🟥 全画面 16:9（最新ゲーム向け）" android:textStyle="bold"/>
+            <RadioButton android:id="@+id/rb_area_manual" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="⬛️ 手動（緑の枠で合わせる）" android:textColor="#FFFFFF" android:textStyle="bold" android:checked="true"/>
+            <RadioButton android:id="@+id/rb_area_4_3" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="🟦 中央 4:3（レトロゲーム向け）" android:textColor="#FFFFFF" android:textStyle="bold"/>
+            <RadioButton android:id="@+id/rb_area_16_9" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="🟥 全画面 16:9（最新ゲーム向け）" android:textColor="#FFFFFF" android:textStyle="bold"/>
         </RadioGroup>
 
         <!-- 🚀 開始ボタン -->
@@ -160,20 +128,9 @@
             android:text="LIVE開始っ！🚀"
             android:textSize="18sp"
             android:textStyle="bold"
+            android:backgroundTint="#FF88AA"
+            android:textColor="#FFFFFF"
             app:layout_constraintTop_toBottomOf="@id/rg_capture_area" />
 
-        <TextView
-            android:id="@+id/tv_status"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:layout_marginBottom="32dp"
-            android:text="ヨチオさんの冒険を全力で応援するよっ🌸"
-            android:textStyle="bold"
-            app:layout_constraintBottom_toBottomOf="parent"
-            app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toBottomOf="@id/btn_start_live" />
-
     </androidx.constraintlayout.widget.ConstraintLayout>
-</androidx.core.widget.NestedScrollView>
+</ScrollView>
