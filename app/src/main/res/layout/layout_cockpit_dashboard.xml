@@ -65,10 +65,38 @@
             android:id="@+id/iv_cockpit_preview"
             android:layout_width="140dp"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="12dp"
+            android:layout_marginBottom="8dp"
             android:background="#333333"
             android:adjustViewBounds="true"
             android:scaleType="fitCenter" />
+
+        <!-- ⏱️ 新機能！撮影間隔スライダー -->
+        <LinearLayout
+            android:layout_width="140dp"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_marginBottom="12dp"
+            android:gravity="center">
+
+            <TextView
+                android:id="@+id/tv_cockpit_interval"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="撮影: 2.0s"
+                android:textColor="#FFFFFF"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+
+            <!-- 0〜20の範囲で、1.0秒〜3.0秒を表現するよっ！ -->
+            <SeekBar
+                android:id="@+id/sb_cockpit_interval"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:max="20"
+                android:progress="10"
+                android:progressTint="#FF88AA"
+                android:thumbTint="#FF88AA" />
+        </LinearLayout>
 
         <LinearLayout
             android:layout_width="wrap_content"
@@ -85,7 +113,6 @@
                 android:background="@drawable/bg_action_button_dark"
                 android:stateListAnimator="@null" />
 
-            <!-- 🌎 翻訳ボタン -->
             <Button
                 android:id="@+id/btn_cockpit_translate"
                 android:layout_width="44dp"
@@ -96,7 +123,6 @@
                 android:background="@drawable/bg_action_button_blue"
                 android:stateListAnimator="@null" />
 
-            <!-- 🔧 枠調整ボタン -->
             <Button
                 android:id="@+id/btn_cockpit_edit_frame"
                 android:layout_width="44dp"
