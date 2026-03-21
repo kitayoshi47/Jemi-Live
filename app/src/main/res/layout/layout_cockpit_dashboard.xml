@@ -28,6 +28,7 @@
                 android:background="@drawable/bg_recording_dot"
                 android:layout_marginEnd="8dp"/>
             <TextView
+                android:id="@+id/tv_cockpit_title"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="JEMI-LIVE COCKPIT"
@@ -69,7 +70,6 @@
             android:adjustViewBounds="true"
             android:scaleType="fitCenter" />
 
-        <!-- 💡 横並びの箱に変更！これで勝手に縦に詰められなくなるよっ🌸 -->
         <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
@@ -83,6 +83,17 @@
                 android:text="📸"
                 android:textSize="20sp"
                 android:background="@drawable/bg_action_button_dark"
+                android:stateListAnimator="@null" />
+
+            <!-- 🌎 翻訳ボタン -->
+            <Button
+                android:id="@+id/btn_cockpit_translate"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:layout_marginStart="8dp"
+                android:text="🌎"
+                android:textSize="16sp"
+                android:background="@drawable/bg_action_button_blue"
                 android:stateListAnimator="@null" />
 
             <!-- 🔧 枠調整ボタン -->

@@ -7,7 +7,7 @@
     android:padding="8dp"
     android:elevation="4dp">
 
-    <!-- 🏷️ ミニヘッダー（ここは固定） -->
+    <!-- 🏷️ ミニヘッダー -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -22,6 +22,7 @@
             android:layout_marginEnd="6dp"/>
 
         <TextView
+            android:id="@+id/tv_commentary_title"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
@@ -32,8 +33,6 @@
             android:letterSpacing="0.1"/>
     </LinearLayout>
 
-    <!-- 📢 実況テキストエリア（スクロール可能） -->
-    <!-- 横幅を200dpに戻して、撮影エリアへの侵入を防止したよっ！ -->
     <ScrollView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -43,7 +42,6 @@
             android:id="@+id/tv_floating_commentary"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="ヨチオさん、横幅を200dpに戻したよっ！これで撮影の邪魔にならないはずっ🌸"
             android:textColor="#FFFFFF"
             android:textSize="13sp"
             android:textStyle="bold"

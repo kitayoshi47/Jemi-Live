@@ -4,7 +4,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:padding="16dp"
-    android:background="#1E1E1E"> <!-- 💡 ヨチオさんのこだわり、#1E1E1E で固定だねっ！ -->
+    android:background="#1E1E1E">
 
     <androidx.constraintlayout.widget.ConstraintLayout
         android:layout_width="match_parent"
@@ -89,7 +89,6 @@
             android:layout_marginTop="8dp"
             android:padding="8dp"
             app:layout_constraintTop_toBottomOf="@id/tv_display_mode_label">
-            <!-- 💡 ラジオボタンも文字色を白(#FFFFFF)に固定して、万全を期したよぉ！ -->
             <RadioButton android:id="@+id/rb_display_dual" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📺 2画面コックピット（Thor推奨）" android:textColor="#FFFFFF" android:textStyle="bold" android:checked="true"/>
             <RadioButton android:id="@+id/rb_display_single" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📱 1画面フローティング" android:textColor="#FFFFFF" android:textStyle="bold"/>
         </RadioGroup>
@@ -119,18 +118,31 @@
             <RadioButton android:id="@+id/rb_area_16_9" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="🟥 全画面 16:9（最新ゲーム向け）" android:textColor="#FFFFFF" android:textStyle="bold"/>
         </RadioGroup>
 
+        <!-- 🛠️ デバッグモード設定 -->
+        <CheckBox
+            android:id="@+id/cb_debug_mode"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="🛠️ デバッグモード（API通信なし）"
+            android:textColor="#FFFFFF"
+            android:textStyle="bold"
+            android:buttonTint="#FF88AA"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/rg_capture_area" />
+
         <!-- 🚀 開始ボタン -->
         <Button
             android:id="@+id/btn_start_live"
             android:layout_width="match_parent"
             android:layout_height="64dp"
-            android:layout_marginTop="32dp"
+            android:layout_marginTop="24dp"
             android:text="LIVE開始っ！🚀"
             android:textSize="18sp"
             android:textStyle="bold"
             android:backgroundTint="#FF88AA"
             android:textColor="#FFFFFF"
-            app:layout_constraintTop_toBottomOf="@id/rg_capture_area" />
+            app:layout_constraintTop_toBottomOf="@id/cb_debug_mode" />
 
     </androidx.constraintlayout.widget.ConstraintLayout>
 </ScrollView>
