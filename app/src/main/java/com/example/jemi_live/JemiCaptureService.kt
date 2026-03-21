@@ -48,9 +48,9 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * JemiCaptureService (v2.9.7 - Debug Mode Integration)
- * - 準備室からの IS_DEBUG フラグに応じて動作を切り替え。
- * - デバッグモード時は各画面のタイトルに "(DEBUG MODE)" を付与。
+ * JemiCaptureService (v2.9.8 - Debug Flag Timing Fix)
+ * - onStartCommand でフラグを受け取った直後に UI タイトルを更新するよう修正。
+ * - サービス起動順序による表示の不整合を解消。
  */
 class JemiCaptureService : Service() {
     private lateinit var mainWindowManager: WindowManager
@@ -88,7 +88,7 @@ class JemiCaptureService : Service() {
     private var generativeModel: GenerativeModel? = null
     private var customOmajinai: String = ""
 
-    private var isDebugMode = false // 💡 可変にするよっ！
+    private var isDebugMode = false
     private var isSingleMode = false
     private var captureAreaMode = "manual"
     private var isFrameAdjustMode = false
@@ -243,11 +243,6 @@ class JemiCaptureService : Service() {
         singleCommentaryView = LayoutInflater.from(this).inflate(R.layout.layout_floating_commentary, null)
         tvCommentary = singleCommentaryView!!.findViewById(R.id.tv_floating_commentary)
 
-        // 💡 1画面モードのタイトル更新
-        if (isDebugMode) {
-            singleCommentaryView!!.findViewById<TextView>(R.id.tv_commentary_title)?.text = "LIVE COMMENTARY (DEBUG MODE)"
-        }
-
         uiWindowManager.addView(singleCommentaryView, commParams)
         setupDraggable(singleControlView!!, controlParams, uiWindowManager, false, true, false) { saveCoords("ctrl", controlParams) }
         setupDraggable(singleCommentaryView!!, commParams, uiWindowManager, true, false, false) { saveCoords("comm", commParams) }
@@ -264,11 +259,6 @@ class JemiCaptureService : Service() {
         val btnEdit = dualCockpitView!!.findViewById<Button>(R.id.btn_cockpit_edit_frame)
         val btnClose = dualCockpitView!!.findViewById<Button>(R.id.btn_cockpit_close)
 
-        // 💡 デバッグモードならタイトルを書き換えるよっ！
-        if (isDebugMode) {
-            dualCockpitView!!.findViewById<TextView>(R.id.tv_cockpit_title)?.text = "JEMI-LIVE COCKPIT (DEBUG MODE)"
-        }
-
         btnTranslate.alpha = if (isTranslationEnabled) 1.0f else 0.5f
         btnTranslate.setOnClickListener {
             isTranslationEnabled = !isTranslationEnabled
@@ -279,6 +269,19 @@ class JemiCaptureService : Service() {
         btnEdit.setOnClickListener { toggleFrameAdjustMode() }
         setupButtonActions(btnClose)
         uiWindowManager.addView(dualCockpitView, cockpitParams)
+    }
+
+    // 💡 フラグが届いた後に看板を書き換えるためのメソッドだよ！
+    private fun updateUiTitles() {
+        val suffix = if (isDebugMode) " (DEBUG MODE)" else ""
+
+        // 2画面モードの看板を更新
+        dualCockpitView?.findViewById<TextView>(R.id.tv_cockpit_title)?.text = "JEMI-LIVE COCKPIT$suffix"
+
+        // 1画面モードの看板を更新
+        singleCommentaryView?.findViewById<TextView>(R.id.tv_commentary_title)?.text = "LIVE COMMENTARY$suffix"
+
+        Log.d("Jemi-Live", "🏷️ UI表示を更新しました: isDebugMode=$isDebugMode")
     }
 
     private fun setupCapture() {
@@ -329,7 +332,7 @@ class JemiCaptureService : Service() {
     private fun setupButtonActions(btnClose: Button) {
         btnCapture.setOnClickListener {
             if (isGeminiThinking || System.currentTimeMillis() - lastCaptureTime < 10000) {
-                Toast.makeText(this, "ジェミ、考え中か休憩中だよぉ🌸", Toast.LENGTH_SHORT).show(); return@setOnClickListener
+                Toast.makeText(this, "ジェミ、まだ考え中か休憩中だよぉ🌸", Toast.LENGTH_SHORT).show(); return@setOnClickListener
             }
             if (imageBuffer.isEmpty()) {
                 Toast.makeText(this, "画像がまだ撮れてないよぉ💦少し待ってね！", Toast.LENGTH_SHORT).show()
@@ -397,8 +400,10 @@ class JemiCaptureService : Service() {
         val k = intent?.getStringExtra("API_KEY") ?: prefs.getString("api_key", "") ?: ""
         customOmajinai = intent?.getStringExtra("OMAJINAI") ?: prefs.getString("omajinai", "") ?: ""
 
-        // 💡 準備室からのデバッグフラグを受け取るよっ！
         isDebugMode = intent?.getBooleanExtra("IS_DEBUG", false) ?: prefs.getBoolean("last_debug_state", false)
+
+        // 💡 お手紙を受け取ったこのタイミングで看板を書き換えるよっ！
+        updateUiTitles()
 
         if (k.isNotEmpty() && generativeModel == null) {
             generativeModel = GenerativeModel(
@@ -418,7 +423,8 @@ class JemiCaptureService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         singleControlView?.let { uiWindowManager.removeView(it) }; singleCommentaryView?.let { uiWindowManager.removeView(it) }
-        singlePreviewView?.let { uiWindowManager.removeView(it) }; dualCockpitView?.let { uiWindowManager.removeView(it) }
+        singlePreviewView?.let { uiWindowManager.removeView(it) }
+        dualCockpitView?.let { uiWindowManager.removeView(it) }
         if (::recognitionFrameView.isInitialized) mainWindowManager.removeView(recognitionFrameView)
         virtualDisplay?.release(); imageReader?.close(); mediaProjection?.stop(); autoCaptureJob?.cancel()
         synchronized(imageBuffer) { imageBuffer.forEach { it.recycle() }; imageBuffer.clear() }
@@ -439,7 +445,6 @@ class JemiCaptureService : Service() {
         Log.d("Jemi-API", "🚀 Gemini API 送信開始...")
 
         if (isDebugMode) {
-            // 💡 デバッグモード時の専用お喋りメッセージ
             val d = if (isTranslationEnabled) "デバッグモード中だよっ！翻訳モードもオンだねっ！ (DEBUG & TRANSLATE OK!)" else "ヨチオさん、デバッグモードでの動作確認中だよっ🌸"
             serviceScope.launch {
                 delay(1500); tvCommentary.text = d; jemiVoice.speak(d);
