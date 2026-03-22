@@ -29,6 +29,7 @@ import android.view.WindowManager
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
@@ -49,9 +50,10 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * JemiCaptureService (v3.0.0 - 6-Tiles Gatchanko & Interval Control)
+ * JemiCaptureService (v3.0.2 - Wide Buffer Preview)
  * - ガッチャンコ画像を 2x3 (6枚) に拡張し、時間解像度を向上。
- * - 撮影間隔を 1.0秒〜3.0秒 (0.1秒刻み) で調整できるスライダーを実装。
+ * - 撮影間隔を 1.0秒〜3.0秒 で調整できるスライダーを実装。
+ * - コックピット画面下部に全幅のバッファ履歴表示を配置し、画像の幅を自然な比率に調整。
  */
 class JemiCaptureService : Service() {
     private lateinit var mainWindowManager: WindowManager
@@ -79,7 +81,6 @@ class JemiCaptureService : Service() {
     private var currentPreviewBitmap: Bitmap? = null
 
     private val imageBuffer = mutableListOf<Bitmap>()
-    // 💡 記憶できる画像の数を4枚から6枚に増やしたよっ！
     private val MAX_BUFFER_SIZE = 6
 
     private var autoCaptureJob: Job? = null
@@ -96,7 +97,6 @@ class JemiCaptureService : Service() {
     private var isFrameAdjustMode = false
     private var isTranslationEnabled = false
 
-    // 💡 撮影間隔の変数を新しく追加！（初期値は2秒）
     private var captureIntervalMs = 2000L
 
     override fun onCreate() {
@@ -104,7 +104,6 @@ class JemiCaptureService : Service() {
         prefs = getSharedPreferences("JemiSettings", Context.MODE_PRIVATE)
         jemiVoice = JemiVoiceManager(this)
 
-        // 💡 記憶していた撮影間隔を呼び出すよ
         captureIntervalMs = prefs.getLong("capture_interval", 2000L)
 
         mainWindowManager = getSystemService(WINDOW_SERVICE) as WindowManager
@@ -268,18 +267,15 @@ class JemiCaptureService : Service() {
         val btnEdit = dualCockpitView!!.findViewById<Button>(R.id.btn_cockpit_edit_frame)
         val btnClose = dualCockpitView!!.findViewById<Button>(R.id.btn_cockpit_close)
 
-        // 💡 スライダーとテキストの設定
         val sbInterval = dualCockpitView!!.findViewById<SeekBar>(R.id.sb_cockpit_interval)
         val tvInterval = dualCockpitView!!.findViewById<TextView>(R.id.tv_cockpit_interval)
 
-        // 現在の間隔からスライダーの位置を計算（1000ms=0, 3000ms=20）
         val currentProgress = ((captureIntervalMs - 1000) / 100).toInt()
         sbInterval.progress = currentProgress
         tvInterval.text = String.format("撮影: %.1fs", captureIntervalMs / 1000f)
 
         sbInterval.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                // 1000ms(1.0s) を基準にして、progress(0〜20) × 100ms を足すよ
                 val newInterval = 1000L + progress * 100L
                 captureIntervalMs = newInterval
                 tvInterval.text = String.format("撮影: %.1fs", newInterval / 1000f)
@@ -288,7 +284,6 @@ class JemiCaptureService : Service() {
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
 
             override fun onStopTrackingTouch(seekBar: SeekBar?) {
-                // 指を離した時に、新しい設定を保存するよっ！
                 prefs.edit().putLong("capture_interval", captureIntervalMs).apply()
                 Log.d("Jemi-Live", "⏱️ 撮影間隔を ${captureIntervalMs}ms に変更したよっ！")
             }
@@ -312,6 +307,36 @@ class JemiCaptureService : Service() {
         singleCommentaryView?.findViewById<TextView>(R.id.tv_commentary_title)?.text = "LIVE COMMENTARY$suffix"
     }
 
+    private fun updateBufferPreviewUI() {
+        if (isSingleMode || dualCockpitView == null) return
+
+        val container = dualCockpitView?.findViewById<LinearLayout>(R.id.ll_buffer_preview) ?: return
+
+        handler.post {
+            container.removeAllViews()
+            synchronized(imageBuffer) {
+                for (bitmap in imageBuffer) {
+                    val iv = ImageView(this@JemiCaptureService).apply {
+                        // 💡 画像の横幅を 72dp に縮めて隙間も少し詰め、6枚すっぽり収まるようにしたよっ！
+                        layoutParams = LinearLayout.LayoutParams(
+                            80.toPx(),
+                            LinearLayout.LayoutParams.MATCH_PARENT
+                        ).apply { marginEnd = 6.toPx() }
+                        scaleType = ImageView.ScaleType.CENTER_CROP
+                        setImageBitmap(bitmap)
+                        clipToOutline = true
+                        outlineProvider = object : android.view.ViewOutlineProvider() {
+                            override fun getOutline(view: View, outline: android.graphics.Outline) {
+                                outline.setRoundRect(0, 0, view.width, view.height, 6f * resources.displayMetrics.density)
+                            }
+                        }
+                    }
+                    container.addView(iv)
+                }
+            }
+        }
+    }
+
     private fun setupCapture() {
         val metrics = DisplayMetrics()
         mainWindowManager.defaultDisplay.getRealMetrics(metrics)
@@ -332,7 +357,14 @@ class JemiCaptureService : Service() {
                     val cropW = min(fullBitmap.width - cropX, cachedCropRect.width()); val cropH = min(fullBitmap.height - cropY, cachedCropRect.height())
                     if (cropW > 0 && cropH > 0) {
                         val cropped = Bitmap.createBitmap(fullBitmap, cropX, cropY, cropW, cropH)
-                        synchronized(imageBuffer) { imageBuffer.add(cropped); if (imageBuffer.size > MAX_BUFFER_SIZE) imageBuffer.removeAt(0).recycle() }
+                        synchronized(imageBuffer) {
+                            imageBuffer.add(cropped)
+                            if (imageBuffer.size > MAX_BUFFER_SIZE) {
+                                val removed = imageBuffer.removeAt(0)
+                                removed.recycle()
+                            }
+                        }
+                        updateBufferPreviewUI()
                     }
                     fullBitmap.recycle()
                 }
@@ -340,17 +372,15 @@ class JemiCaptureService : Service() {
         }, null)
     }
 
-    // 💡 ついに6枚（2列×3段）にガッチャンコする進化したロジックだよっ！
     private fun createGatchankoBitmap(bitmaps: List<Bitmap>): Bitmap? {
         if (bitmaps.isEmpty()) return null
 
-        // 1枚の比率から、全体のサイズを計算するよ
         val ratio = bitmaps[0].height.toFloat() / bitmaps[0].width.toFloat()
 
         val tileW = 256
         val tileH = (tileW * ratio).toInt()
         val canvasW = 512
-        val canvasH = tileH * 3 // 💡 2段から3段になったから、3を掛けるんだっ！
+        val canvasH = tileH * 3
 
         val res = Bitmap.createBitmap(canvasW, canvasH, Bitmap.Config.RGB_565)
         val canvas = Canvas(res)
@@ -359,11 +389,10 @@ class JemiCaptureService : Service() {
 
         synchronized(imageBuffer) {
             for (i in bitmaps.indices) {
-                if (i >= 6) break // 💡 最大6枚まで並べるよっ！
+                if (i >= 6) break
                 val src = bitmaps[i]
                 val l = (i % 2) * tileW
                 val t = (i / 2) * tileH
-                // タイルの中に少し余白を残して綺麗に並べるね
                 canvas.drawBitmap(src, null, Rect(l + 2, t + 2, l + tileW - 2, t + tileH - 2), paint)
             }
         }
@@ -425,8 +454,6 @@ class JemiCaptureService : Service() {
         autoCaptureJob = serviceScope.launch {
             while (isActive) {
                 if (!isSingleMode || (::previewView.isInitialized && previewView.visibility != View.VISIBLE)) isCaptureRequested = true
-
-                // 💡 ここの待ち時間を、ヨチオさんがスライダーで決めた秒数にするよっ！
                 delay(captureIntervalMs)
             }
         }
@@ -497,7 +524,6 @@ class JemiCaptureService : Service() {
         serviceScope.launch {
             try {
                 val translatePrompt = if (isTranslationEnabled) "\n【重要】日本語実況のすぐ後に、内容を英語に翻訳した一文も付け加えて！" else ""
-                // 💡 プロンプトの指示も「2x3タイル」に更新して、ジェミに新しい形を教えるよっ！
                 val p = "最新の画像状況を見て、簡潔にテンション高く実況して！$translatePrompt\n【ルール】最大3行、100文字以内！画像は2x3タイルの時系列だよ。"
                 val res = model.generateContent(content { blob("image/jpeg", j); text(p) })
                 val rep = res.text ?: "読み取れなかったみたい💦"
