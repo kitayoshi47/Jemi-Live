@@ -57,8 +57,9 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * JemiCaptureService (v3.0.5 - Debug Image Export)
+ * JemiCaptureService (v3.0.6 - High Quality Bicubic Scaling)
  * - [Feature] デバッグ用：プレビュー画像の長押しでガッチャンコ画像をファイル出力する機能を追加。
+ * - [Update] 縮小処理を `createScaledBitmap` から `Matrix + Paint.FILTER_BITMAP_FLAG` に変更し、文字潰れ（バイキュービック補間）を改善。
  */
 class JemiCaptureService : Service() {
     private lateinit var mainWindowManager: WindowManager
@@ -375,9 +376,24 @@ class JemiCaptureService : Service() {
                     val cropW = min(fullBitmap.width - cropX, cachedCropRect.width()); val cropH = min(fullBitmap.height - cropY, cachedCropRect.height())
                     if (cropW > 0 && cropH > 0) {
                         val cropped = Bitmap.createBitmap(fullBitmap, cropX, cropY, cropW, cropH)
+
                         val targetTileW = 256
                         val targetTileH = if (captureAreaMode == "16_9") 144 else 170
-                        val scaled = Bitmap.createScaledBitmap(cropped, targetTileW, targetTileH, true)
+
+                        // --- [Main Architect Update: 高品質バイキュービック補間] ---
+                        // createScaledBitmap ではなく、Matrix と FILTER_BITMAP_FLAG で最高品質の縮小を行うよっ！
+                        val scaled = Bitmap.createBitmap(targetTileW, targetTileH, Bitmap.Config.ARGB_8888)
+                        val scaleX = targetTileW.toFloat() / cropped.width
+                        val scaleY = targetTileH.toFloat() / cropped.height
+
+                        val scaleMatrix = Matrix().apply { setScale(scaleX, scaleY, 0f, 0f) }
+                        val scaleCanvas = Canvas(scaled)
+                        scaleCanvas.setMatrix(scaleMatrix)
+
+                        val filterPaint = Paint(Paint.FILTER_BITMAP_FLAG)
+                        scaleCanvas.drawBitmap(cropped, 0f, 0f, filterPaint)
+                        // -----------------------------------------------------------
+
                         val finalBmp = scaled.copy(Bitmap.Config.RGB_565, false)
                         if (scaled != finalBmp) scaled.recycle()
                         cropped.recycle()
@@ -552,7 +568,7 @@ class JemiCaptureService : Service() {
 
             Log.d("Jemi-Debug", "📂 画像を保存したよっ！: ${imageFile.absolutePath}")
             handler.post {
-                Toast.makeText(this, "保存完了っ！📸\\n$fileName", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "保存完了っ！📸\n$fileName", Toast.LENGTH_SHORT).show()
             }
         } catch (e: Exception) {
             Log.e("Jemi-Debug", "画像の保存に失敗しちゃった……", e)
