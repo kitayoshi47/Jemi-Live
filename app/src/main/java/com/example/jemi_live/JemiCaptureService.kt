@@ -50,10 +50,9 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * JemiCaptureService (v3.0.2 - Wide Buffer Preview)
- * - ガッチャンコ画像を 2x3 (6枚) に拡張し、時間解像度を向上。
- * - 撮影間隔を 1.0秒〜3.0秒 で調整できるスライダーを実装。
- * - コックピット画面下部に全幅のバッファ履歴表示を配置し、画像の幅を自然な比率に調整。
+ * JemiCaptureService (v3.0.3 - High Quality Scaling & Green Border Equation)
+ * - [Phase 1.1] キャプチャ直後にバイキュービック補間で高品質縮小し、メモリを節約。
+ * - [Phase 1.1] 512x512の正方形キャンバスに緑の十字境界線でパッキング。
  */
 class JemiCaptureService : Service() {
     private lateinit var mainWindowManager: WindowManager
@@ -317,7 +316,7 @@ class JemiCaptureService : Service() {
             synchronized(imageBuffer) {
                 for (bitmap in imageBuffer) {
                     val iv = ImageView(this@JemiCaptureService).apply {
-                        // 💡 画像の横幅を 72dp に縮めて隙間も少し詰め、6枚すっぽり収まるようにしたよっ！
+                        // 💡 画像の横幅を 80dp に縮めて隙間も少し詰め、6枚すっぽり収まるようにしたよっ！
                         layoutParams = LinearLayout.LayoutParams(
                             80.toPx(),
                             LinearLayout.LayoutParams.MATCH_PARENT
@@ -357,8 +356,24 @@ class JemiCaptureService : Service() {
                     val cropW = min(fullBitmap.width - cropX, cachedCropRect.width()); val cropH = min(fullBitmap.height - cropY, cachedCropRect.height())
                     if (cropW > 0 && cropH > 0) {
                         val cropped = Bitmap.createBitmap(fullBitmap, cropX, cropY, cropW, cropH)
+
+                        // --- [Main Architect Update: Phase 1.1] ---
+                        // 高品質縮小とRGB_565変換でメモリを節約しつつ精度を確保するよっ！
+                        val targetTileW = 256
+                        val targetTileH = if (captureAreaMode == "16_9") 144 else 170
+
+                        // filter=true でバイキュービックに近い高品質なリサイズをかけるのですよっ♪
+                        val scaled = Bitmap.createScaledBitmap(cropped, targetTileW, targetTileH, true)
+
+                        // メモリ効率化のために RGB_565 に変換してからバッファへ！
+                        val finalBmp = scaled.copy(Bitmap.Config.RGB_565, false)
+
+                        if (scaled != finalBmp) scaled.recycle()
+                        cropped.recycle() // 中間Bitmapを即リサイクルしてGCを助けるよっ！
+                        // ------------------------------------------
+
                         synchronized(imageBuffer) {
-                            imageBuffer.add(cropped)
+                            imageBuffer.add(finalBmp)
                             if (imageBuffer.size > MAX_BUFFER_SIZE) {
                                 val removed = imageBuffer.removeAt(0)
                                 removed.recycle()
@@ -372,30 +387,57 @@ class JemiCaptureService : Service() {
         }, null)
     }
 
+    /**
+     * [Main Architect Update: Phase 1.1]
+     * 170px + 1px(緑) + 170px + 1px(緑) + 170px = 512px の黄金方程式でガッチャンコするよっ！
+     */
     private fun createGatchankoBitmap(bitmaps: List<Bitmap>): Bitmap? {
         if (bitmaps.isEmpty()) return null
 
-        val ratio = bitmaps[0].height.toFloat() / bitmaps[0].width.toFloat()
-
         val tileW = 256
-        val tileH = (tileW * ratio).toInt()
+        val tileH = if (captureAreaMode == "16_9") 144 else 170
+
         val canvasW = 512
-        val canvasH = tileH * 3
+        // 16:9の場合は512x434 (144*3 + 2線)、4:3の場合は黄金の512x512にするよっ♪
+        val canvasH = if (captureAreaMode == "16_9") tileH * 3 + 2 else 512
 
         val res = Bitmap.createBitmap(canvasW, canvasH, Bitmap.Config.RGB_565)
         val canvas = Canvas(res)
-        canvas.drawColor(Color.BLACK)
-        val paint = Paint().apply { isFilterBitmap = true }
+        canvas.drawColor(Color.BLACK) // 背景を黒にしておくよっ
+
+        val paint = Paint().apply {
+            isFilterBitmap = true // 描画時もフィルタリングを忘れずにっ
+            isDither = true
+        }
+
+        // 境界線用のPaint（ヨチオさん指定の鮮やかな緑 💚）
+        val borderPaint = Paint().apply {
+            color = Color.GREEN
+            strokeWidth = 1f
+        }
 
         synchronized(imageBuffer) {
             for (i in bitmaps.indices) {
                 if (i >= 6) break
                 val src = bitmaps[i]
-                val l = (i % 2) * tileW
-                val t = (i / 2) * tileH
-                canvas.drawBitmap(src, null, Rect(l + 2, t + 2, l + tileW - 2, t + tileH - 2), paint)
+                val col = i % 2
+                val row = i / 2
+
+                // 描画座標の計算：境界線(1px)の分だけずらして配置するよっ！
+                val x = (col * tileW).toFloat()
+                val y = (row * tileH + row).toFloat()
+
+                canvas.drawBitmap(src, x, y, paint)
             }
         }
+
+        // 境界線を引いて、AI（あたし）にコマの区切りを教えるのですよっ♪
+        // 横線（2本）
+        canvas.drawLine(0f, tileH.toFloat(), canvasW.toFloat(), tileH.toFloat(), borderPaint)
+        canvas.drawLine(0f, (tileH * 2 + 1).toFloat(), canvasW.toFloat(), (tileH * 2 + 1).toFloat(), borderPaint)
+        // 縦線（1本）
+        canvas.drawLine(tileW.toFloat(), 0f, tileW.toFloat(), canvasH.toFloat(), borderPaint)
+
         return res
     }
 
