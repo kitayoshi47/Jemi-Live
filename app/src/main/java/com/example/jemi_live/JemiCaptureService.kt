@@ -15,6 +15,7 @@ import android.media.ImageReader
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
+import android.os.Environment
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
@@ -47,14 +48,17 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
 
 /**
- * JemiCaptureService (v3.0.4 - Resilience Update)
- * - [Fix] モデル名を正しく "gemini-3.1-flash-lite-preview" に修正したよっ！
- * - [Fix] 503エラー（サーバー高負荷）対策として、指数バックオフによる自動再試行を実装。
- * - [Fix] 受信成功時の実況テキストログを復活させたよっ！
+ * JemiCaptureService (v3.0.5 - Debug Image Export)
+ * - [Feature] デバッグ用：プレビュー画像の長押しでガッチャンコ画像をファイル出力する機能を追加。
  */
 class JemiCaptureService : Service() {
     private lateinit var mainWindowManager: WindowManager
@@ -246,6 +250,13 @@ class JemiCaptureService : Service() {
         singlePreviewView = LayoutInflater.from(this).inflate(R.layout.layout_floating_preview, null)
         previewView = singlePreviewView as ImageView
         previewView.visibility = View.GONE
+
+        // 👇 ここに追加！：プレビュー画像長押しで保存するよっ📸
+        previewView.setOnLongClickListener {
+            saveGatchankoToFile(currentPreviewBitmap)
+            true
+        }
+
         uiWindowManager.addView(singlePreviewView, previewParams)
 
         val commParams = WindowManager.LayoutParams(200.toPx(), WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP or Gravity.END; x = prefs.getInt("comm_x", 0); y = prefs.getInt("comm_y", 0) }
@@ -263,6 +274,13 @@ class JemiCaptureService : Service() {
         dualCockpitView = LayoutInflater.from(this).inflate(R.layout.layout_cockpit_dashboard, null)
         tvCommentary = dualCockpitView!!.findViewById(R.id.tv_cockpit_commentary)
         previewView = dualCockpitView!!.findViewById(R.id.iv_cockpit_preview)
+
+        // 👇 ここに追加！：コックピットのプレビュー長押しでも保存できるよっ📸
+        previewView.setOnLongClickListener {
+            saveGatchankoToFile(currentPreviewBitmap)
+            true
+        }
+
         btnCapture = dualCockpitView!!.findViewById(R.id.btn_cockpit_capture)
         val btnTranslate = dualCockpitView!!.findViewById<Button>(R.id.btn_cockpit_translate)
         val btnEdit = dualCockpitView!!.findViewById<Button>(R.id.btn_cockpit_edit_frame)
@@ -506,6 +524,43 @@ class JemiCaptureService : Service() {
 
     override fun onBind(i: Intent?): IBinder? = null
     private fun Int.toPx(): Int = (this * resources.displayMetrics.density).toInt()
+
+    /**
+     * 💾 ガッチャンコ画像をデバッグ用にファイル出力するよっ！
+     */
+    private fun saveGatchankoToFile(bitmap: Bitmap?) {
+        if (bitmap == null) {
+            Toast.makeText(this, "保存する画像がないよぉ💦", Toast.LENGTH_SHORT).show()
+            return
+        }
+        try {
+            val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+            val fileName = "JemiLive_Debug_$timeStamp.jpg"
+            val storageDir = getExternalFilesDir(Environment.DIRECTORY_PICTURES)
+
+            if (storageDir != null && !storageDir.exists()) {
+                storageDir.mkdirs()
+            }
+
+            val imageFile = File(storageDir, fileName)
+            val outputStream = FileOutputStream(imageFile)
+
+            // 圧縮率60%で保存！API送信時と全く同じ条件だよっ♪
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 60, outputStream)
+            outputStream.flush()
+            outputStream.close()
+
+            Log.d("Jemi-Debug", "📂 画像を保存したよっ！: ${imageFile.absolutePath}")
+            handler.post {
+                Toast.makeText(this, "保存完了っ！📸\\n$fileName", Toast.LENGTH_SHORT).show()
+            }
+        } catch (e: Exception) {
+            Log.e("Jemi-Debug", "画像の保存に失敗しちゃった……", e)
+            handler.post {
+                Toast.makeText(this, "保存失敗っ😭", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
 
     /**
      * [Main Architect Update: v3.0.4]
