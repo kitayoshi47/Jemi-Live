@@ -58,10 +58,10 @@ import kotlin.math.min
 import androidx.core.graphics.createBitmap
 
 /**
- * JemiCaptureService (v3.1.0 - Manual Translation Trigger)
+ * JemiCaptureService (v3.1.1 - Emulator Friendly & Manual Translation Trigger)
  * - [Feature] 翻訳ボタン（🌎）による手動トリガー機能を実装。高解像度(512px)撮影に対応。
- * - [Update] 実況ボタンと翻訳ボタンのクールタイム・ステートを同期。
- * - [Inherit] 3段階リサイズ高品質バイキュービック補間 & 左右上下カットエリア対応を継承。
+ * - [Fix] エミュレータ環境で画面更新が止まる問題への対策（ステルス・ハートビート）を追加。
+ * - [Inherit] 3段階リサイズ高品質バイキュービック補間 & 左右上下カットエリア対応。
  */
 class JemiCaptureService : Service() {
     private lateinit var mainWindowManager: WindowManager
@@ -73,7 +73,7 @@ class JemiCaptureService : Service() {
     private lateinit var frameParams: WindowManager.LayoutParams
     private lateinit var tvCommentary: TextView
     private lateinit var btnCapture: Button
-    private var btnTranslate: Button? = null // 追加：翻訳ボタンをメンバ変数化
+    private var btnTranslate: Button? = null
     private lateinit var previewView: ImageView
 
     private var singleControlView: View? = null
@@ -86,7 +86,7 @@ class JemiCaptureService : Service() {
     private var virtualDisplay: VirtualDisplay? = null
     private var imageReader: ImageReader? = null
     private var isCaptureRequested = false
-    private var isTranslationRequested = false // 追加：手動翻訳リクエストフラグ
+    private var isTranslationRequested = false
     private var isGeminiThinking = false
     private var currentPreviewBitmap: Bitmap? = null
 
@@ -105,7 +105,7 @@ class JemiCaptureService : Service() {
     private var isSingleMode = false
     private var captureAreaMode = "manual"
     private var isFrameAdjustMode = false
-    private var isTranslationEnabled = false // 既存の実況内翻訳設定
+    private var isTranslationEnabled = false
 
     private var captureIntervalMs = 2000L
 
@@ -121,6 +121,9 @@ class JemiCaptureService : Service() {
         setupFloatingWindows()
     }
 
+    /**
+     * 🕵️ 実行環境がエミュレータかどうかを執拗にチェックするよっ！
+     */
     fun isEmulatorBuildProperties(): Boolean {
         return (Build.BRAND.startsWith("generic") && Build.DEVICE.startsWith("generic"))
                 || Build.FINGERPRINT.startsWith("generic")
@@ -204,20 +207,24 @@ class JemiCaptureService : Service() {
         }
 
         startForegroundService()
+
+        // 👻 エミュレータ環境なら、心臓マッサージ（画面更新強制）を開始するよっ！
         if (isEmulatorBuildProperties()) { setupForceUpdateView() }
+
         handler.postDelayed({ updateCropCache() }, 500)
     }
 
+    /**
+     * 👻 [Emulator Workaround] 1x1ピクセルの透明Viewを動かし続けて、OSに画面更新を強制するのですよっ♪
+     */
     private fun setupForceUpdateView() {
-        // 1. 最小サイズ (1x1) で作成
         val forceUpdateView = View(this).apply {
-            setBackgroundColor(Color.WHITE) // 何色でもOK
-            alpha = 0.01f // ほぼ透明。0にするとスキップされる恐れがあるので0.01
+            setBackgroundColor(Color.WHITE)
+            alpha = 0.01f // 目立たないようにほぼ透明っ！
         }
 
-        // 2. 画面の隅 (0, 0) に配置
         val params = WindowManager.LayoutParams(
-            1, 1, // 1x1ピクセル
+            1, 1,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                     WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
@@ -225,24 +232,18 @@ class JemiCaptureService : Service() {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = 0
-            y = 0
+            x = 0; y = 0
         }
 
         try {
             mainWindowManager.addView(forceUpdateView, params)
 
-            // 3. 心臓の鼓動（ハートビート）のようにプロパティを動かし続ける
             serviceScope.launch {
                 var toggle = false
                 while (isActive) {
-                    // rotationを動かすだけでも「更新」とみなされます
                     forceUpdateView.rotation = if (toggle) 0f else 1f
                     toggle = !toggle
-
-                    // キャプチャ間隔(captureIntervalMs)より少し短い間隔で回すと確実です
-                    // ここでは200msごとに「画面が動いたよ！」と通知します
-                    delay(200)
+                    delay(200) // 0.2秒ごとに鼓動を打つよっ！
                 }
             }
             Log.d("Jemi-Live", "👻 ステルス・ハートビート起動（エミュレータ対策）")
@@ -348,7 +349,7 @@ class JemiCaptureService : Service() {
         }
 
         btnCapture = dualCockpitView!!.findViewById(R.id.btn_cockpit_capture)
-        btnTranslate = dualCockpitView!!.findViewById<Button>(R.id.btn_cockpit_translate) // メンバ変数に代入
+        btnTranslate = dualCockpitView!!.findViewById<Button>(R.id.btn_cockpit_translate)
         val btnEdit = dualCockpitView!!.findViewById<Button>(R.id.btn_cockpit_edit_frame)
         val btnClose = dualCockpitView!!.findViewById<Button>(R.id.btn_cockpit_close)
 
@@ -374,14 +375,13 @@ class JemiCaptureService : Service() {
             }
         })
 
-        // 🌎 翻訳ボタンの挙動を変更！(手動トリガー化)
         btnTranslate?.setOnClickListener {
             if (isGeminiThinking || System.currentTimeMillis() - lastCaptureTime < 10000) {
                 Toast.makeText(this, "ジェミ、まだ考え中か休憩中だよぉ🌸", Toast.LENGTH_SHORT).show(); return@setOnClickListener
             }
             Log.d("Jemi-Live", "🌎 手動翻訳ボタンが押されたよっ！高解像度で撮影を開始します！")
             isTranslationRequested = true
-            isCaptureRequested = true // setupCapture内のリスナーをトリガーするよ
+            isCaptureRequested = true
         }
 
         if (captureAreaMode != "manual") btnEdit.visibility = View.GONE
@@ -436,7 +436,6 @@ class JemiCaptureService : Service() {
             if (!isCaptureRequested) { image.close(); return@setOnImageAvailableListener }
             isCaptureRequested = false
 
-            // 🌎 手動翻訳リクエストか、通常の実況バッファ用撮影かを保持する
             val isCurrentTrans = isTranslationRequested
             isTranslationRequested = false
 
@@ -465,7 +464,6 @@ class JemiCaptureService : Service() {
                             cropW - (cutX * 2),
                             cropH - (cutY * 2))
 
-                        // --- [🌎翻訳ボタン対応：ターゲットサイズの決定] ---
                         val targetTileW = if (isCurrentTrans) 512 else 256
                         val targetTileH = if (isCurrentTrans) {
                             if (captureAreaMode == "16_9") 288 else 384
@@ -479,7 +477,7 @@ class JemiCaptureService : Service() {
                             isDither = true
                         }
 
-                        // --- ステップ1: 1/2 ---
+                        // --- [3段階リサイズ 高品質バイキュービック補間] ---
                         val midWidth = cropped.width / 2
                         val midHeight = cropped.height / 2
                         val midBitmap = createBitmap(midWidth, midHeight)
@@ -488,7 +486,6 @@ class JemiCaptureService : Service() {
                             drawBitmap(cropped, matrix, highQualityPaint)
                         }
 
-                        // --- ステップ2: 1/4 ---
                         val midWidth_half = midWidth / 2
                         val midHeight_half = midHeight / 2
                         val midBitmap_half = createBitmap(midWidth_half, midHeight_half)
@@ -497,7 +494,6 @@ class JemiCaptureService : Service() {
                             drawBitmap(midBitmap, matrix, highQualityPaint)
                         }
 
-                        // --- ステップ3: Final ---
                         val scaled = createBitmap(targetTileW, targetTileH)
                         Canvas(scaled).apply {
                             val scaleX = targetTileW.toFloat() / midWidth_half
@@ -514,17 +510,15 @@ class JemiCaptureService : Service() {
                         cropped.recycle()
 
                         if (isCurrentTrans) {
-                            // 🌎 手動翻訳の処理へ即座に飛ばすよっ！
                             handler.post {
                                 lastCaptureTime = System.currentTimeMillis()
                                 currentPreviewBitmap?.recycle()
                                 currentPreviewBitmap = finalBmp
                                 previewView.setImageBitmap(finalBmp)
                                 updateCaptureButtonState()
-                                getJemiTranslation(finalBmp) // 翻訳専用メソッド
+                                getJemiTranslation(finalBmp)
                             }
                         } else {
-                            // 通常の実況バッファ追加
                             synchronized(imageBuffer) {
                                 imageBuffer.add(finalBmp)
                                 if (imageBuffer.size > MAX_BUFFER_SIZE) {
@@ -593,9 +587,6 @@ class JemiCaptureService : Service() {
         }
     }
 
-    /**
-     * ボタンのステート（📸と🌎の両方）を一括管理するのですよっ！
-     */
     private fun updateCaptureButtonState() {
         if (!::btnCapture.isInitialized) return
         val t = System.currentTimeMillis() - lastCaptureTime
@@ -605,15 +596,13 @@ class JemiCaptureService : Service() {
         val buttonText = when {
             isGeminiThinking -> "🤔"
             cooling -> "⌛️"
-            else -> null // デフォルト（📸や🌎）に戻す
+            else -> null
         }
 
-        // 実況ボタン
         btnCapture.isEnabled = isEnabled
         btnCapture.text = buttonText ?: "📸"
         btnCapture.alpha = if (isEnabled) 1.0f else 0.5f
 
-        // 🌎 翻訳ボタンの同期
         btnTranslate?.let { btn ->
             btn.isEnabled = isEnabled
             btn.text = buttonText ?: "🌎"
@@ -622,8 +611,6 @@ class JemiCaptureService : Service() {
 
         if (cooling && !isGeminiThinking) handler.postDelayed({ updateCaptureButtonState() }, 10000 - t + 50)
     }
-
-    // (中略: setupDraggable, startAutoCaptureTimer, startForegroundService は変更なし)
 
     @SuppressLint("ClickableViewAccessibility")
     private fun setupDraggable(v: View, p: WindowManager.LayoutParams, wm: WindowManager, iT: Boolean, iB: Boolean, iL: Boolean, oM: () -> Unit) {
@@ -712,12 +699,8 @@ class JemiCaptureService : Service() {
         }
     }
 
-    /**
-     * 🌎 [Phase 2.1] 手動翻訳リクエスト処理
-     * 高解像度な一枚画像からテキストを抽出して翻訳するのですよっ♪
-     */
     private fun getJemiTranslation(b: Bitmap) {
-        val o = java.io.ByteArrayOutputStream(); b.compress(Bitmap.CompressFormat.JPEG, 80, o) // 翻訳用はリッチに80%！
+        val o = java.io.ByteArrayOutputStream(); b.compress(Bitmap.CompressFormat.JPEG, 80, o)
         val j = o.toByteArray()
         Log.d("Jemi-Live", "📊 翻訳用JPEG作成完了: ${j.size / 1024} KB (512px)")
 
