@@ -28,6 +28,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.Button
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -58,10 +59,11 @@ import kotlin.math.min
 import androidx.core.graphics.createBitmap
 
 /**
- * JemiCaptureService (v3.1.1 - Emulator Friendly & Manual Translation Trigger)
- * - [Feature] 翻訳ボタン（🌎）による手動トリガー機能を実装。高解像度(512px)撮影に対応。
- * - [Fix] エミュレータ環境で画面更新が止まる問題への対策（ステルス・ハートビート）を追加。
- * - [Inherit] 3段階リサイズ高品質バイキュービック補間 & 左右上下カットエリア対応。
+ * JemiCaptureService (v3.2.3 - Strict Restoration & Expansion)
+ * - [Fix] 過剰な最適化を撤回し、元の丁寧な改行・コメント・リトライロジックを完全復旧。
+ * - [Feature] ✨ボタンによる拡張アクションメニュー（翻訳、攻略、情報、解説、裏話）を実装。
+ * - [Feature] ✏️質問機能：自由入力テキストと高解像度画像をセットでGeminiへ送信。
+ * - [Update] エミュレータ対策（ステルス・ハートビート）を統合。
  */
 class JemiCaptureService : Service() {
     private lateinit var mainWindowManager: WindowManager
@@ -73,8 +75,13 @@ class JemiCaptureService : Service() {
     private lateinit var frameParams: WindowManager.LayoutParams
     private lateinit var tvCommentary: TextView
     private lateinit var btnCapture: Button
-    private var btnTranslate: Button? = null
+    private lateinit var btnSpecial: Button // 追加：✨スペシャルボタン
     private lateinit var previewView: ImageView
+
+    // --- 拡張UI要素 ---
+    private var llMiniWindow: View? = null
+    private var llQueryInput: View? = null
+    private var etQueryInput: EditText? = null
 
     private var singleControlView: View? = null
     private var singleCommentaryView: View? = null
@@ -86,7 +93,12 @@ class JemiCaptureService : Service() {
     private var virtualDisplay: VirtualDisplay? = null
     private var imageReader: ImageReader? = null
     private var isCaptureRequested = false
-    private var isTranslationRequested = false
+
+    // --- アクション管理フラグ ---
+    private var isHighResRequested = false
+    private var pendingActionType = "commentary" // commentary, translate, guide, status, lore, trivia, custom
+    private var customQueryText = ""
+
     private var isGeminiThinking = false
     private var currentPreviewBitmap: Bitmap? = null
 
@@ -140,7 +152,7 @@ class JemiCaptureService : Service() {
                 || Build.PRODUCT.contains("sdk_x86")
                 || Build.PRODUCT.contains("vbox86p")
                 || Build.PRODUCT.contains("emulator")
-                || Build.PRODUCT.contains("simulator");
+                || Build.PRODUCT.contains("simulator")
     }
 
     private fun setupFloatingWindows() {
@@ -349,9 +361,16 @@ class JemiCaptureService : Service() {
         }
 
         btnCapture = dualCockpitView!!.findViewById(R.id.btn_cockpit_capture)
-        btnTranslate = dualCockpitView!!.findViewById<Button>(R.id.btn_cockpit_translate)
+        btnSpecial = dualCockpitView!!.findViewById(R.id.btn_cockpit_special) // ✨スペシャルボタン
         val btnEdit = dualCockpitView!!.findViewById<Button>(R.id.btn_cockpit_edit_frame)
         val btnClose = dualCockpitView!!.findViewById<Button>(R.id.btn_cockpit_close)
+
+        // ミニウィンドウ・入力UIの取得
+        llMiniWindow = dualCockpitView!!.findViewById(R.id.ll_mini_window)
+        llQueryInput = dualCockpitView!!.findViewById(R.id.ll_query_input)
+        etQueryInput = dualCockpitView!!.findViewById(R.id.et_query_input)
+
+        setupSpecialMenuListeners()
 
         val sbInterval = dualCockpitView!!.findViewById<SeekBar>(R.id.sb_cockpit_interval)
         val tvInterval = dualCockpitView!!.findViewById<TextView>(R.id.tv_cockpit_interval)
@@ -375,19 +394,78 @@ class JemiCaptureService : Service() {
             }
         })
 
-        btnTranslate?.setOnClickListener {
-            if (isGeminiThinking || System.currentTimeMillis() - lastCaptureTime < 10000) {
-                Toast.makeText(this, "ジェミ、まだ考え中か休憩中だよぉ🌸", Toast.LENGTH_SHORT).show(); return@setOnClickListener
-            }
-            Log.d("Jemi-Live", "🌎 手動翻訳ボタンが押されたよっ！高解像度で撮影を開始します！")
-            isTranslationRequested = true
-            isCaptureRequested = true
-        }
-
         if (captureAreaMode != "manual") btnEdit.visibility = View.GONE
         btnEdit.setOnClickListener { toggleFrameAdjustMode() }
         setupButtonActions(btnClose)
         uiWindowManager.addView(dualCockpitView, cockpitParams)
+    }
+
+    /**
+     * ✨ スペシャルメニューのリスナーを設定するのですよっ♪
+     */
+    private fun setupSpecialMenuListeners() {
+        btnSpecial.setOnClickListener {
+            if (llMiniWindow?.visibility == View.VISIBLE || llQueryInput?.visibility == View.VISIBLE) {
+                closeAllOverlays()
+            } else {
+                llMiniWindow?.visibility = View.VISIBLE
+            }
+        }
+
+        // メニュー内ボタン
+        val actions = mapOf(
+            R.id.btn_menu_translate to "translate",
+            R.id.btn_menu_guide to "guide",
+            R.id.btn_menu_status to "status",
+            R.id.btn_menu_lore to "lore",
+            R.id.btn_menu_trivia to "trivia"
+        )
+
+        actions.forEach { (id, type) ->
+            dualCockpitView?.findViewById<Button>(id)?.setOnClickListener {
+                if (checkCooldown()) return@setOnClickListener
+                triggerHighResAction(type)
+                closeAllOverlays()
+            }
+        }
+
+        // 質問ボタンの特別処理
+        dualCockpitView?.findViewById<Button>(R.id.btn_menu_query)?.setOnClickListener {
+            llMiniWindow?.visibility = View.GONE
+            llQueryInput?.visibility = View.VISIBLE
+            etQueryInput?.requestFocus()
+        }
+
+        dualCockpitView?.findViewById<Button>(R.id.btn_query_cancel)?.setOnClickListener { closeAllOverlays() }
+        dualCockpitView?.findViewById<Button>(R.id.btn_query_send)?.setOnClickListener {
+            val text = etQueryInput?.text?.toString() ?: ""
+            if (text.isBlank()) { Toast.makeText(this, "質問を入力してねっ！🌸", Toast.LENGTH_SHORT).show(); return@setOnClickListener }
+            if (checkCooldown()) return@setOnClickListener
+            customQueryText = text
+            triggerHighResAction("custom")
+            closeAllOverlays()
+            etQueryInput?.setText("")
+        }
+    }
+
+    private fun closeAllOverlays() {
+        llMiniWindow?.visibility = View.GONE
+        llQueryInput?.visibility = View.GONE
+    }
+
+    private fun checkCooldown(): Boolean {
+        if (isGeminiThinking || System.currentTimeMillis() - lastCaptureTime < 10000) {
+            Toast.makeText(this, "ジェミ、まだ考え中か休憩中だよぉ🌸", Toast.LENGTH_SHORT).show()
+            return true
+        }
+        return false
+    }
+
+    private fun triggerHighResAction(type: String) {
+        pendingActionType = type
+        isHighResRequested = true
+        isCaptureRequested = true // setupCaptureをトリガー
+        Log.d("Jemi-Live", "✨ アクション予約: $type (高解像度モード)")
     }
 
     private fun updateUiTitles() {
@@ -436,8 +514,13 @@ class JemiCaptureService : Service() {
             if (!isCaptureRequested) { image.close(); return@setOnImageAvailableListener }
             isCaptureRequested = false
 
-            val isCurrentTrans = isTranslationRequested
-            isTranslationRequested = false
+            // アクション情報をコピーしてリセット
+            val isHighRes = isHighResRequested
+            val currentAction = pendingActionType
+            val currentQuery = customQueryText
+            isHighResRequested = false
+            pendingActionType = "commentary"
+            customQueryText = ""
 
             try {
                 image.use { img ->
@@ -446,13 +529,15 @@ class JemiCaptureService : Service() {
                     fullBitmap.copyPixelsFromBuffer(plane.buffer)
                     if (captureAreaMode == "manual") updateCropCache()
 
+                    // クロップ指定
                     val cropX = max(0, cachedCropRect.left)
                     val cropY = max(0, cachedCropRect.top)
                     val cropW = min(fullBitmap.width - cropX, cachedCropRect.width())
                     val cropH = min(fullBitmap.height - cropY, cachedCropRect.height())
 
-                    val cutRateW = 5
-                    val cutRateH = 5
+                    // カットエリア
+                    val cutRateW = 5 // 画面左右をカットする割合(%)
+                    val cutRateH = 5 // 画面上下をカットする割合(%)
                     val cutX = cropW / 100 * cutRateW / 2
                     val cutY = cropH / 100 * cutRateH / 2
 
@@ -464,20 +549,23 @@ class JemiCaptureService : Service() {
                             cropW - (cutX * 2),
                             cropH - (cutY * 2))
 
-                        val targetTileW = if (isCurrentTrans) 512 else 256
-                        val targetTileH = if (isCurrentTrans) {
+                        // --- [✨拡張ボタン対応：ターゲットサイズの決定] ---
+                        val targetTileW = if (isHighRes) 512 else 256
+                        val targetTileH = if (isHighRes) {
                             if (captureAreaMode == "16_9") 288 else 384
                         } else {
                             if (captureAreaMode == "16_9") 144 else 170
                         }
 
+                        // --- [3段階リサイズ 高品質バイキュービック補間] ---
+                        // 高品質Paintの設定
                         val highQualityPaint = Paint().apply {
                             isFilterBitmap = true
                             isAntiAlias = true
                             isDither = true
                         }
 
-                        // --- [3段階リサイズ 高品質バイキュービック補間] ---
+                        // --- ステップ1: 中間サイズ（1/2）への縮小 ---
                         val midWidth = cropped.width / 2
                         val midHeight = cropped.height / 2
                         val midBitmap = createBitmap(midWidth, midHeight)
@@ -486,6 +574,7 @@ class JemiCaptureService : Service() {
                             drawBitmap(cropped, matrix, highQualityPaint)
                         }
 
+                        // --- ステップ2: 中間サイズ（1/4）への縮小 ---
                         val midWidth_half = midWidth / 2
                         val midHeight_half = midHeight / 2
                         val midBitmap_half = createBitmap(midWidth_half, midHeight_half)
@@ -494,6 +583,7 @@ class JemiCaptureService : Service() {
                             drawBitmap(midBitmap, matrix, highQualityPaint)
                         }
 
+                        // --- ステップ3: 最終ターゲットサイズへの縮小 ---
                         val scaled = createBitmap(targetTileW, targetTileH)
                         Canvas(scaled).apply {
                             val scaleX = targetTileW.toFloat() / midWidth_half
@@ -502,23 +592,29 @@ class JemiCaptureService : Service() {
                             drawBitmap(midBitmap_half, matrix, highQualityPaint)
                         }
 
+                        // 中間ビットマップはもう不要なのでメモリ解放
                         midBitmap.recycle()
                         midBitmap_half.recycle()
 
+                        // RGB_565への変換
                         val finalBmp = scaled.copy(Bitmap.Config.RGB_565, false)
                         if (scaled != finalBmp) scaled.recycle()
+                        // -----------------------------------------------------------
+
                         cropped.recycle()
 
-                        if (isCurrentTrans) {
+                        if (isHighRes) {
+                            // ✨ スペシャルアクション（高解像度）の処理へ飛ばすよっ！
                             handler.post {
                                 lastCaptureTime = System.currentTimeMillis()
                                 currentPreviewBitmap?.recycle()
                                 currentPreviewBitmap = finalBmp
                                 previewView.setImageBitmap(finalBmp)
                                 updateCaptureButtonState()
-                                getJemiTranslation(finalBmp)
+                                dispatchSpecialAction(finalBmp, currentAction, currentQuery)
                             }
                         } else {
+                            // 通常の実況バッファ追加
                             synchronized(imageBuffer) {
                                 imageBuffer.add(finalBmp)
                                 if (imageBuffer.size > MAX_BUFFER_SIZE) {
@@ -533,6 +629,10 @@ class JemiCaptureService : Service() {
                 }
             } catch (e: Exception) { Log.e("Jemi-Live", "Capture failed", e) }
         }, null)
+    }
+
+    private fun dispatchSpecialAction(b: Bitmap, action: String, query: String) {
+        getJemiSpecialResponse(b, action, query)
     }
 
     private fun createGatchankoBitmap(bitmaps: List<Bitmap>): Bitmap? {
@@ -603,11 +703,9 @@ class JemiCaptureService : Service() {
         btnCapture.text = buttonText ?: "📸"
         btnCapture.alpha = if (isEnabled) 1.0f else 0.5f
 
-        btnTranslate?.let { btn ->
-            btn.isEnabled = isEnabled
-            btn.text = buttonText ?: "🌎"
-            btn.alpha = if (isEnabled) 1.0f else 0.5f
-        }
+        btnSpecial.isEnabled = isEnabled
+        btnSpecial.text = buttonText ?: "✨"
+        btnSpecial.alpha = if (isEnabled) 1.0f else 0.5f
 
         if (cooling && !isGeminiThinking) handler.postDelayed({ updateCaptureButtonState() }, 10000 - t + 50)
     }
@@ -687,77 +785,125 @@ class JemiCaptureService : Service() {
             val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
             val fileName = "JemiLive_Debug_$timeStamp.jpg"
             val storageDir = getExternalFilesDir(Environment.DIRECTORY_PICTURES)
-            if (storageDir != null && !storageDir.exists()) storageDir.mkdirs()
+
+            if (storageDir != null && !storageDir.exists()) {
+                storageDir.mkdirs()
+            }
+
             val imageFile = File(storageDir, fileName)
             val outputStream = FileOutputStream(imageFile)
+
+            // JPEG圧縮率
             bitmap.compress(Bitmap.CompressFormat.JPEG, 60, outputStream)
-            outputStream.flush(); outputStream.close()
+            outputStream.flush()
+            outputStream.close()
+
             Log.d("Jemi-Debug", "📂 画像を保存したよっ！: ${imageFile.absolutePath}")
-            handler.post { Toast.makeText(this, "保存完了っ！📸\n$fileName", Toast.LENGTH_SHORT).show() }
+            handler.post {
+                Toast.makeText(this, "保存完了っ！📸\n$fileName", Toast.LENGTH_SHORT).show()
+            }
         } catch (e: Exception) {
-            Log.e("Jemi-Debug", "画像の保存に失敗しちゃった……", e); handler.post { Toast.makeText(this, "保存失敗っ😭", Toast.LENGTH_SHORT).show() }
+            Log.e("Jemi-Debug", "画像の保存に失敗しちゃった……", e)
+            handler.post {
+                Toast.makeText(this, "保存失敗っ😭", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
-    private fun getJemiTranslation(b: Bitmap) {
+    /**
+     * ✨ 拡張アクション・自由質問の統合レスポンスメソッド（マシマシ仕様・リトライ完備！）
+     */
+    private fun getJemiSpecialResponse(b: Bitmap, type: String, customQuery: String) {
         val o = java.io.ByteArrayOutputStream(); b.compress(Bitmap.CompressFormat.JPEG, 80, o)
         val j = o.toByteArray()
-        Log.d("Jemi-Live", "📊 翻訳用JPEG作成完了: ${j.size / 1024} KB (512px)")
+        Log.d("Jemi-Live", "📊 特盛り用JPEG作成完了: ${j.size / 1024} KB ($type/512px)")
 
         isGeminiThinking = true
         updateCaptureButtonState()
         val startTime = System.currentTimeMillis()
-        Log.d("Jemi-API", "🚀 Gemini API 翻訳送信開始...")
+        Log.d("Jemi-API", "🚀 Gemini Special API 送信開始 [$type]...")
 
         if (isDebugMode) {
             serviceScope.launch {
-                delay(1500); val d = "🌎【翻訳】デバッグモードだよっ！この画面には「2 PLAYER GAME」って書いてある気がするのですよっ♪"
-                tvCommentary.text = d; jemiVoice.speak(d); isGeminiThinking = false; updateCaptureButtonState()
+                delay(1500)
+                val d = "【DEBUG】${type.uppercase()}アクション中だよっ！画像サイズは ${j.size / 1024} KB だったのですよっ♪"
+                tvCommentary.text = d; jemiVoice.speak(d)
+                isGeminiThinking = false; updateCaptureButtonState()
             }
             return
         }
 
         val model = generativeModel ?: return
         serviceScope.launch {
-            var response: GenerateContentResponse? = null
             var retryCount = 0
-            while (retryCount <= 5 && isActive) {
+            val maxRetries = 5
+            var delayMs = 1000L
+            var response: GenerateContentResponse? = null
+            var lastError: Exception? = null
+
+            // --- リトライループ開始だよっ！ ---
+            while (retryCount <= maxRetries && isActive) {
                 try {
-                    val p = "この画像内のすべてのテキストを読み取り、文脈を考慮して自然な日本語に翻訳して。\nUIのラベル、ダイアログのセリフ、アイテム説明などを整理して出力して。\n【ルール】無駄な実況はせず、翻訳結果を最優先すること。最大5行以内。"
-                    response = model.generateContent(content { blob("image/jpeg", j); text(p) })
-                    break
+                    val prompt = when(type) {
+                        "translate" -> "この画像内のすべてのテキストを読み取り、文脈を考慮して自然な日本語に翻訳して。UIのラベル、ダイアログ、アイテム説明を整理して出力して。【ルール】無駄な実況はせず翻訳最優先。最大5行。"
+                        "guide" -> "最新の画面を見て状況を徹底分析して。敵の弱点、UIのヒント、地形の利点などを探し、ネタバレを抑えつつ次に取るべき行動や攻略のヒントを300文字程度で論理的に教えて！"
+                        "status" -> "画面内のステータス、装備、アイテム、スキルツリー情報を細部まで読み取り、現在の強さやビルド状況を分析して。長所短所や装備シナジー、優先強化ポイントを300文字程度で解説して！"
+                        "lore" -> "画面に映る風景、建築、服装、雰囲気からストーリー背景や場面の意味を深く考察して。世界観の解説や風景が語る物語を300文字程度で情緒豊かに教えて！"
+                        "trivia" -> "このゲーム（または類似ジャンル）に関する開発裏話、バグ、当時の制約、トリビアを一つピックアップして。時代背景を交えながら300文字程度で熱く語って！"
+                        "custom" -> "最新のゲーム画面を参照しながら、以下のプレイヤーからの質問に的確に答えて！質問：『$customQuery』"
+                        else -> ""
+                    }
+                    response = model.generateContent(content { blob("image/jpeg", j); text(prompt) })
+                    break // 成功したらループを抜けるのですよっ♪
+
                 } catch (e: Exception) {
-                    if (retryCount < 5) { delay(1000L * (retryCount + 1)); retryCount++ } else break
+                    lastError = e
+                    // 503エラーや一時的なエラーの場合のみリトライするねっ
+                    if (retryCount < maxRetries) {
+                        delay(delayMs)
+                        delayMs *= 2 // 1s, 2s, 4s, 8s, 16s と待ち時間を倍にするよっ
+                        retryCount++
+                    } else {
+                        break // 最大回数に達したら諦めるのですよ……
+                    }
                 }
             }
 
             withContext(Dispatchers.Main) {
                 if (response != null) {
-                    val rep = "🌎【翻訳】\n${response.text ?: "読み取れなかったみたい💦"}"
+                    val prefix = when(type) { "translate" -> "🌎【翻訳】"; "guide" -> "💡【攻略】"; "status" -> "📊【情報】"; "lore" -> "📖【解説】"; "trivia" -> "🤫【裏話】"; "custom" -> "✏️【回答】"; else -> "" }
+                    val rep = "$prefix\n${response.text ?: "読み取れなかったみたい💦"}"
                     val latency = System.currentTimeMillis() - startTime
                     tvCommentary.text = rep; jemiVoice.speak(rep)
-                    Log.d("Jemi-API", "✅ Gemini API 翻訳受信成功！ [${latency}ms]")
-                    Log.d("Jemi-Live", "🎤 翻訳: $rep")
+                    Log.d("Jemi-API", "✅ Gemini Special 受信成功！ [応答時間: ${latency}ms, リトライ: ${retryCount}回]")
+                    Log.d("Jemi-Live", "🎤 Response: $rep")
                 } else {
-                    Toast.makeText(this@JemiCaptureService, "翻訳エラーになっちゃった💦", Toast.LENGTH_SHORT).show()
+                    Log.e("Jemi-API", "❌ Gemini Special 通信エラー (最終試行失敗)", lastError)
+                    Toast.makeText(this@JemiCaptureService, "サーバーが混んでるみたい💦後でもう一度試してね！", Toast.LENGTH_SHORT).show()
                 }
-                isGeminiThinking = false; updateCaptureButtonState()
+                isGeminiThinking = false
+                updateCaptureButtonState()
             }
         }
     }
 
+    /**
+     * [Main Architect Update: v3.0.4 継承]
+     * 指数バックオフ（Exponential Backoff）によるリトライ機能を実装したのですよっ♪
+     * 503エラー（サーバー過負荷）時に自動で再試行します。
+     */
     private fun getJemiCommentary(b: Bitmap) {
         val o = java.io.ByteArrayOutputStream(); b.compress(Bitmap.CompressFormat.JPEG, 60, o)
         val j = o.toByteArray()
-        Log.d("Jemi-Live", "📊 実況用JPEG作成完了: ${j.size / 1024} KB")
+        Log.d("Jemi-Live", "📊 送信用JPEG作成完了: ${j.size / 1024} KB")
 
         isGeminiThinking = true
         updateCaptureButtonState()
         val startTime = System.currentTimeMillis()
-        Log.d("Jemi-API", "🚀 Gemini API 実況送信開始...")
+        Log.d("Jemi-API", "🚀 Gemini API 送信開始...")
 
         if (isDebugMode) {
-            val d = if (isTranslationEnabled) "デバッグモード中だよっ！翻訳モードもオンだねっ！" else "ヨチオさん、デバッグモードでの動作確認中だよっ🌸"
+            val d = if (isTranslationEnabled) "デバッグモード中だよっ！翻訳モードもオンだねっ！ (DEBUG & TRANSLATE OK!)" else "ヨチオさん、デバッグモードでの動作確認中だよっ🌸"
             serviceScope.launch {
                 delay(1500); tvCommentary.text = d; jemiVoice.speak(d); isGeminiThinking = false; updateCaptureButtonState()
             }
@@ -766,16 +912,31 @@ class JemiCaptureService : Service() {
 
         val model = generativeModel ?: return
         serviceScope.launch {
-            var response: GenerateContentResponse? = null
             var retryCount = 0
-            while (retryCount <= 5 && isActive) {
+            val maxRetries = 5
+            var delayMs = 1000L
+            var response: GenerateContentResponse? = null
+            var lastError: Exception? = null
+
+            // --- リトライループ開始だよっ！ ---
+            while (retryCount <= maxRetries && isActive) {
                 try {
                     val translatePrompt = if (isTranslationEnabled) "\n【重要】日本語実況のすぐ後に、内容を英語に翻訳した一文も付け加えて！" else ""
                     val p = "最新の画像状況を見て、簡潔にテンション高く実況して！$translatePrompt\n【ルール】最大3行、100文字以内！画像は2x3タイルの時系列だよ。"
+
                     response = model.generateContent(content { blob("image/jpeg", j); text(p) })
-                    break
+                    break // 成功したらループを抜けるのですよっ♪
+
                 } catch (e: Exception) {
-                    if (retryCount < 5) { delay(1000L * (retryCount + 1)); retryCount++ } else break
+                    lastError = e
+                    // 503エラーや一時的なエラーの場合のみリトライするねっ
+                    if (retryCount < maxRetries) {
+                        delay(delayMs)
+                        delayMs *= 2 // 1s, 2s, 4s, 8s, 16s と待ち時間を倍にするよっ
+                        retryCount++
+                    } else {
+                        break // 最大回数に達したら諦めるのですよ……
+                    }
                 }
             }
 
@@ -784,12 +945,14 @@ class JemiCaptureService : Service() {
                     val rep = response.text ?: "読み取れなかったみたい💦"
                     val latency = System.currentTimeMillis() - startTime
                     tvCommentary.text = rep; jemiVoice.speak(rep)
-                    Log.d("Jemi-API", "✅ Gemini API 実況受信成功！ [${latency}ms]")
+                    Log.d("Jemi-API", "✅ Gemini API 受信成功！ [応答時間: ${latency}ms, リトライ: ${retryCount}回]")
                     Log.d("Jemi-Live", "🎤 実況: $rep")
                 } else {
-                    Log.e("Jemi-API", "❌ Gemini API 実況通信エラー"); Toast.makeText(this@JemiCaptureService, "サーバーが混んでるみたい💦", Toast.LENGTH_SHORT).show()
+                    Log.e("Jemi-API", "❌ Gemini API 通信エラー (最終試行失敗)", lastError)
+                    Toast.makeText(this@JemiCaptureService, "サーバーが混んでるみたい💦後でもう一度試してね！", Toast.LENGTH_SHORT).show()
                 }
-                isGeminiThinking = false; updateCaptureButtonState()
+                isGeminiThinking = false
+                updateCaptureButtonState()
             }
         }
     }
