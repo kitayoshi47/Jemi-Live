@@ -121,6 +121,25 @@ class JemiCaptureService : Service() {
         setupFloatingWindows()
     }
 
+    fun isEmulatorBuildProperties(): Boolean {
+        return (Build.BRAND.startsWith("generic") && Build.DEVICE.startsWith("generic"))
+                || Build.FINGERPRINT.startsWith("generic")
+                || Build.FINGERPRINT.startsWith("unknown")
+                || Build.HARDWARE.contains("goldfish")
+                || Build.HARDWARE.contains("ranchu")
+                || Build.MODEL.contains("google_sdk")
+                || Build.MODEL.contains("Emulator")
+                || Build.MODEL.contains("Android SDK built for x86")
+                || Build.MANUFACTURER.contains("Genymotion")
+                || Build.PRODUCT.contains("sdk_gphone")
+                || Build.PRODUCT.contains("google_sdk")
+                || Build.PRODUCT.contains("sdk")
+                || Build.PRODUCT.contains("sdk_x86")
+                || Build.PRODUCT.contains("vbox86p")
+                || Build.PRODUCT.contains("emulator")
+                || Build.PRODUCT.contains("simulator");
+    }
+
     private fun setupFloatingWindows() {
         isSingleMode = prefs.getBoolean("is_single_display_mode", false)
         val areaId = prefs.getInt("last_capture_area_id", R.id.rb_area_manual)
@@ -185,7 +204,51 @@ class JemiCaptureService : Service() {
         }
 
         startForegroundService()
+        if (isEmulatorBuildProperties()) { setupForceUpdateView() }
         handler.postDelayed({ updateCropCache() }, 500)
+    }
+
+    private fun setupForceUpdateView() {
+        // 1. 最小サイズ (1x1) で作成
+        val forceUpdateView = View(this).apply {
+            setBackgroundColor(Color.WHITE) // 何色でもOK
+            alpha = 0.01f // ほぼ透明。0にするとスキップされる恐れがあるので0.01
+        }
+
+        // 2. 画面の隅 (0, 0) に配置
+        val params = WindowManager.LayoutParams(
+            1, 1, // 1x1ピクセル
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = 0
+            y = 0
+        }
+
+        try {
+            mainWindowManager.addView(forceUpdateView, params)
+
+            // 3. 心臓の鼓動（ハートビート）のようにプロパティを動かし続ける
+            serviceScope.launch {
+                var toggle = false
+                while (isActive) {
+                    // rotationを動かすだけでも「更新」とみなされます
+                    forceUpdateView.rotation = if (toggle) 0f else 1f
+                    toggle = !toggle
+
+                    // キャプチャ間隔(captureIntervalMs)より少し短い間隔で回すと確実です
+                    // ここでは200msごとに「画面が動いたよ！」と通知します
+                    delay(200)
+                }
+            }
+            Log.d("Jemi-Live", "👻 ステルス・ハートビート起動（エミュレータ対策）")
+        } catch (e: Exception) {
+            Log.e("Jemi-Live", "UpdateViewの追加に失敗", e)
+        }
     }
 
     private fun toggleFrameAdjustMode() {
