@@ -28,7 +28,6 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.Button
-import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -59,11 +58,10 @@ import kotlin.math.min
 import androidx.core.graphics.createBitmap
 
 /**
- * JemiCaptureService (v3.2.3 - Strict Restoration & Expansion)
- * - [Fix] 過剰な最適化を撤回し、元の丁寧な改行・コメント・リトライロジックを完全復旧。
- * - [Feature] ✨ボタンによる拡張アクションメニュー（翻訳、攻略、情報、解説、裏話）を実装。
- * - [Feature] ✏️質問機能：自由入力テキストと高解像度画像をセットでGeminiへ送信。
- * - [Update] エミュレータ対策（ステルス・ハートビート）を統合。
+ * JemiCaptureService (v3.2.6 - Stable Expansion without Query)
+ * - [Restored] v3.2.3をベースに、ログ出力・リトライ処理・3段階スケーリングを完全維持。
+ * - [Feature] ✨ボタンによる拡張アクションメニュー（翻訳、攻略、情報、解説、裏話）を安定稼働。
+ * - [Omit] 日本語IMEで競合が発生した「✏️質問機能（Custom Query）」を一旦削除し安定化。
  */
 class JemiCaptureService : Service() {
     private lateinit var mainWindowManager: WindowManager
@@ -80,8 +78,6 @@ class JemiCaptureService : Service() {
 
     // --- 拡張UI要素 ---
     private var llMiniWindow: View? = null
-    private var llQueryInput: View? = null
-    private var etQueryInput: EditText? = null
 
     private var singleControlView: View? = null
     private var singleCommentaryView: View? = null
@@ -96,8 +92,7 @@ class JemiCaptureService : Service() {
 
     // --- アクション管理フラグ ---
     private var isHighResRequested = false
-    private var pendingActionType = "commentary" // commentary, translate, guide, status, lore, trivia, custom
-    private var customQueryText = ""
+    private var pendingActionType = "commentary" // commentary, translate, guide, status, lore, trivia
 
     private var isGeminiThinking = false
     private var currentPreviewBitmap: Bitmap? = null
@@ -332,6 +327,7 @@ class JemiCaptureService : Service() {
         previewView = singlePreviewView as ImageView
         previewView.visibility = View.GONE
 
+        // 👇 ここに追加！：プレビュー画像長押しで保存するよっ📸
         previewView.setOnLongClickListener {
             saveGatchankoToFile(currentPreviewBitmap)
             true
@@ -365,10 +361,8 @@ class JemiCaptureService : Service() {
         val btnEdit = dualCockpitView!!.findViewById<Button>(R.id.btn_cockpit_edit_frame)
         val btnClose = dualCockpitView!!.findViewById<Button>(R.id.btn_cockpit_close)
 
-        // ミニウィンドウ・入力UIの取得
+        // ミニウィンドウの取得のみ残すよっ（質問入力は削除）
         llMiniWindow = dualCockpitView!!.findViewById(R.id.ll_mini_window)
-        llQueryInput = dualCockpitView!!.findViewById(R.id.ll_query_input)
-        etQueryInput = dualCockpitView!!.findViewById(R.id.et_query_input)
 
         setupSpecialMenuListeners()
 
@@ -405,14 +399,14 @@ class JemiCaptureService : Service() {
      */
     private fun setupSpecialMenuListeners() {
         btnSpecial.setOnClickListener {
-            if (llMiniWindow?.visibility == View.VISIBLE || llQueryInput?.visibility == View.VISIBLE) {
+            if (llMiniWindow?.visibility == View.VISIBLE) {
                 closeAllOverlays()
             } else {
                 llMiniWindow?.visibility = View.VISIBLE
             }
         }
 
-        // メニュー内ボタン
+        // メニュー内ボタン（質問ボタン以外）
         val actions = mapOf(
             R.id.btn_menu_translate to "translate",
             R.id.btn_menu_guide to "guide",
@@ -428,29 +422,10 @@ class JemiCaptureService : Service() {
                 closeAllOverlays()
             }
         }
-
-        // 質問ボタンの特別処理
-        dualCockpitView?.findViewById<Button>(R.id.btn_menu_query)?.setOnClickListener {
-            llMiniWindow?.visibility = View.GONE
-            llQueryInput?.visibility = View.VISIBLE
-            etQueryInput?.requestFocus()
-        }
-
-        dualCockpitView?.findViewById<Button>(R.id.btn_query_cancel)?.setOnClickListener { closeAllOverlays() }
-        dualCockpitView?.findViewById<Button>(R.id.btn_query_send)?.setOnClickListener {
-            val text = etQueryInput?.text?.toString() ?: ""
-            if (text.isBlank()) { Toast.makeText(this, "質問を入力してねっ！🌸", Toast.LENGTH_SHORT).show(); return@setOnClickListener }
-            if (checkCooldown()) return@setOnClickListener
-            customQueryText = text
-            triggerHighResAction("custom")
-            closeAllOverlays()
-            etQueryInput?.setText("")
-        }
     }
 
     private fun closeAllOverlays() {
         llMiniWindow?.visibility = View.GONE
-        llQueryInput?.visibility = View.GONE
     }
 
     private fun checkCooldown(): Boolean {
@@ -517,10 +492,8 @@ class JemiCaptureService : Service() {
             // アクション情報をコピーしてリセット
             val isHighRes = isHighResRequested
             val currentAction = pendingActionType
-            val currentQuery = customQueryText
             isHighResRequested = false
             pendingActionType = "commentary"
-            customQueryText = ""
 
             try {
                 image.use { img ->
@@ -611,7 +584,7 @@ class JemiCaptureService : Service() {
                                 currentPreviewBitmap = finalBmp
                                 previewView.setImageBitmap(finalBmp)
                                 updateCaptureButtonState()
-                                dispatchSpecialAction(finalBmp, currentAction, currentQuery)
+                                dispatchSpecialAction(finalBmp, currentAction)
                             }
                         } else {
                             // 通常の実況バッファ追加
@@ -631,8 +604,8 @@ class JemiCaptureService : Service() {
         }, null)
     }
 
-    private fun dispatchSpecialAction(b: Bitmap, action: String, query: String) {
-        getJemiSpecialResponse(b, action, query)
+    private fun dispatchSpecialAction(b: Bitmap, action: String) {
+        getJemiSpecialResponse(b, action)
     }
 
     private fun createGatchankoBitmap(bitmaps: List<Bitmap>): Bitmap? {
@@ -811,9 +784,9 @@ class JemiCaptureService : Service() {
     }
 
     /**
-     * ✨ 拡張アクション・自由質問の統合レスポンスメソッド（マシマシ仕様・リトライ完備！）
+     * ✨ 拡張アクションの統合レスポンスメソッド（質問機能なし版）
      */
-    private fun getJemiSpecialResponse(b: Bitmap, type: String, customQuery: String) {
+    private fun getJemiSpecialResponse(b: Bitmap, type: String) {
         val o = java.io.ByteArrayOutputStream(); b.compress(Bitmap.CompressFormat.JPEG, 80, o)
         val j = o.toByteArray()
         Log.d("Jemi-Live", "📊 特盛り用JPEG作成完了: ${j.size / 1024} KB ($type/512px)")
@@ -850,7 +823,6 @@ class JemiCaptureService : Service() {
                         "status" -> "画面内のステータス、装備、アイテム、スキルツリー情報を細部まで読み取り、現在の強さやビルド状況を分析して。長所短所や装備シナジー、優先強化ポイントを300文字程度で解説して！"
                         "lore" -> "画面に映る風景、建築、服装、雰囲気からストーリー背景や場面の意味を深く考察して。世界観の解説や風景が語る物語を300文字程度で情緒豊かに教えて！"
                         "trivia" -> "このゲーム（または類似ジャンル）に関する開発裏話、バグ、当時の制約、トリビアを一つピックアップして。時代背景を交えながら300文字程度で熱く語って！"
-                        "custom" -> "最新のゲーム画面を参照しながら、以下のプレイヤーからの質問に的確に答えて！質問：『$customQuery』"
                         else -> ""
                     }
                     response = model.generateContent(content { blob("image/jpeg", j); text(prompt) })
@@ -871,7 +843,7 @@ class JemiCaptureService : Service() {
 
             withContext(Dispatchers.Main) {
                 if (response != null) {
-                    val prefix = when(type) { "translate" -> "🌎【翻訳】"; "guide" -> "💡【攻略】"; "status" -> "📊【情報】"; "lore" -> "📖【解説】"; "trivia" -> "🤫【裏話】"; "custom" -> "✏️【回答】"; else -> "" }
+                    val prefix = when(type) { "translate" -> "🌎【翻訳】"; "guide" -> "💡【攻略】"; "status" -> "📊【情報】"; "lore" -> "📖【解説】"; "trivia" -> "🤫【裏話】"; else -> "" }
                     val rep = "$prefix\n${response.text ?: "読み取れなかったみたい💦"}"
                     val latency = System.currentTimeMillis() - startTime
                     tvCommentary.text = rep; jemiVoice.speak(rep)

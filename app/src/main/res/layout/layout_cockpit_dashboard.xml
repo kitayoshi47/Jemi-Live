@@ -198,69 +198,6 @@
             <Button android:id="@+id/btn_menu_status" android:layout_width="110dp" android:layout_height="40dp" android:text="📊 情報" android:textSize="12sp" android:layout_margin="4dp" android:background="@drawable/bg_action_button_dark" android:stateListAnimator="@null" android:textColor="#FFFFFF"/>
             <Button android:id="@+id/btn_menu_lore" android:layout_width="110dp" android:layout_height="40dp" android:text="📖 解説" android:textSize="12sp" android:layout_margin="4dp" android:background="@drawable/bg_action_button_dark" android:stateListAnimator="@null" android:textColor="#FFFFFF"/>
             <Button android:id="@+id/btn_menu_trivia" android:layout_width="110dp" android:layout_height="40dp" android:text="🤫 裏話" android:textSize="12sp" android:layout_margin="4dp" android:background="@drawable/bg_action_button_dark" android:stateListAnimator="@null" android:textColor="#FFFFFF"/>
-            <Button android:id="@+id/btn_menu_query" android:layout_width="110dp" android:layout_height="40dp" android:text="✏️ 質問" android:textSize="12sp" android:layout_margin="4dp" android:background="@drawable/bg_action_button_blue" android:stateListAnimator="@null" android:textColor="#FFFFFF"/>
         </GridLayout>
     </LinearLayout>
-
-    <!-- ✍️ オーバーレイ：質問入力UI -->
-    <LinearLayout
-        android:id="@+id/ll_query_input"
-        android:layout_width="260dp"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center"
-        android:orientation="vertical"
-        android:background="@drawable/bg_floating_panel"
-        android:padding="16dp"
-        android:visibility="gone"
-        android:elevation="10dp">
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="✏️ ジェミに質問っ！"
-            android:textColor="#FF88AA"
-            android:textSize="12sp"
-            android:textStyle="bold"
-            android:layout_marginBottom="8dp"/>
-
-        <EditText
-            android:id="@+id/et_query_input"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:minLines="2"
-            android:hint="右下のアイコンって何？など"
-            android:textSize="14sp"
-            android:textColor="#FFFFFF"
-            android:textColorHint="#888888"
-            android:background="@android:color/transparent"
-            android:padding="8dp"/>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="end"
-            android:layout_marginTop="8dp">
-            <Button
-                android:id="@+id/btn_query_cancel"
-                android:layout_width="wrap_content"
-                android:layout_height="36dp"
-                android:text="キャンセル"
-                android:textSize="11sp"
-                android:background="@android:color/transparent"
-                android:textColor="#888888"
-                android:stateListAnimator="@null"/>
-            <Button
-                android:id="@+id/btn_query_send"
-                android:layout_width="80dp"
-                android:layout_height="36dp"
-                android:layout_marginStart="8dp"
-                android:text="送信っ！"
-                android:textSize="11sp"
-                android:background="@drawable/bg_action_button_blue"
-                android:textColor="#FFFFFF"
-                android:stateListAnimator="@null"/>
-        </LinearLayout>
-    </LinearLayout>
-
 </FrameLayout>
