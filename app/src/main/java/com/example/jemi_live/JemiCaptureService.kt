@@ -55,11 +55,12 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
+import androidx.core.graphics.createBitmap
 
 /**
- * JemiCaptureService (v3.0.6 - High Quality Bicubic Scaling)
- * - [Feature] デバッグ用：プレビュー画像の長押しでガッチャンコ画像をファイル出力する機能を追加。
- * - [Update] 縮小処理を `createScaledBitmap` から `Matrix + Paint.FILTER_BITMAP_FLAG` に変更し、文字潰れ（バイキュービック補間）を改善。
+ * JemiCaptureService (v3.0.7 - High Quality Bicubic Scaling)
+ * - [Feature] 縮小処理を `createScaledBitmap` から `Matrix + Paint.FILTER_BITMAP_FLAG` に変更し、文字潰れ（バイキュービック補間）を改善。
+ * - [Update] 3段階リサイズ 高品質バイキュービック補間対応。キャプチャ画像の左右上下カットエリア対応。
  */
 class JemiCaptureService : Service() {
     private lateinit var mainWindowManager: WindowManager
@@ -372,30 +373,77 @@ class JemiCaptureService : Service() {
                     val fullBitmap = Bitmap.createBitmap(metrics.widthPixels + (plane.rowStride - plane.pixelStride * metrics.widthPixels) / plane.pixelStride, img.height, Bitmap.Config.ARGB_8888)
                     fullBitmap.copyPixelsFromBuffer(plane.buffer)
                     if (captureAreaMode == "manual") updateCropCache()
-                    val cropX = max(0, cachedCropRect.left); val cropY = max(0, cachedCropRect.top)
-                    val cropW = min(fullBitmap.width - cropX, cachedCropRect.width()); val cropH = min(fullBitmap.height - cropY, cachedCropRect.height())
+
+                    // クロップ指定
+                    val cropX = max(0, cachedCropRect.left)
+                    val cropY = max(0, cachedCropRect.top)
+                    val cropW = min(fullBitmap.width - cropX, cachedCropRect.width())
+                    val cropH = min(fullBitmap.height - cropY, cachedCropRect.height())
+
+                    // カットエリア
+                    val cutRateW = 5 // 画面左右をカットする割合(%)
+                    val cutRateH = 5 // 画面上下をカットする割合(%)
+                    val cutX = cropW / 100 * cutRateW / 2
+                    val cutY = cropH / 100 * cutRateH / 2
+
                     if (cropW > 0 && cropH > 0) {
-                        val cropped = Bitmap.createBitmap(fullBitmap, cropX, cropY, cropW, cropH)
+                        val cropped = Bitmap.createBitmap(
+                            fullBitmap,
+                            cropX + cutX,
+                            cropY + cutY,
+                            cropW - (cutX * 2),
+                            cropH - (cutY * 2))
 
                         val targetTileW = 256
                         val targetTileH = if (captureAreaMode == "16_9") 144 else 170
 
-                        // --- [Main Architect Update: 高品質バイキュービック補間] ---
-                        // createScaledBitmap ではなく、Matrix と FILTER_BITMAP_FLAG で最高品質の縮小を行うよっ！
-                        val scaled = Bitmap.createBitmap(targetTileW, targetTileH, Bitmap.Config.ARGB_8888)
-                        val scaleX = targetTileW.toFloat() / cropped.width
-                        val scaleY = targetTileH.toFloat() / cropped.height
+                        // --- [3段階リサイズ 高品質バイキュービック補間] ---
+                        // 高品質Paintの設定
+                        val highQualityPaint = Paint().apply {
+                            isFilterBitmap = true
+                            isAntiAlias = true
+                            isDither = true
+                        }
 
-                        val scaleMatrix = Matrix().apply { setScale(scaleX, scaleY, 0f, 0f) }
-                        val scaleCanvas = Canvas(scaled)
-                        scaleCanvas.setMatrix(scaleMatrix)
+                        // --- ステップ1: 中間サイズ（1/2）への縮小 ---
+                        val midWidth = cropped.width / 2
+                        val midHeight = cropped.height / 2
+                        val midBitmap = createBitmap(midWidth, midHeight)
+                        Canvas(midBitmap).apply {
+                            val matrix = Matrix().apply { setScale(0.5f, 0.5f) }
+                            drawBitmap(cropped, matrix, highQualityPaint)
+                        }
 
-                        val filterPaint = Paint(Paint.FILTER_BITMAP_FLAG)
-                        scaleCanvas.drawBitmap(cropped, 0f, 0f, filterPaint)
-                        // -----------------------------------------------------------
+                        // --- ステップ2: 中間サイズ（1/4）への縮小 ---
+                        val midWidth_half = midWidth / 2
+                        val midHeight_half = midHeight / 2
+                        val midBitmap_half = createBitmap(midWidth_half, midHeight_half)
+                        Canvas(midBitmap_half).apply {
+                            val matrix = Matrix().apply { setScale(0.5f, 0.5f) }
+                            drawBitmap(midBitmap, matrix, highQualityPaint)
+                        }
 
+                        // --- ステップ3: 最終ターゲットサイズへの縮小 ---
+                        val scaled = createBitmap(targetTileW, targetTileH)
+                        Canvas(scaled).apply {
+                            val scaleX = targetTileW.toFloat() / midWidth_half
+                            val scaleY = targetTileH.toFloat() / midHeight_half
+                            val matrix = Matrix().apply { setScale(scaleX, scaleY) }
+                            drawBitmap(midBitmap_half, matrix, highQualityPaint)
+                        }
+
+                        // 中間ビットマップはもう不要なのでメモリ解放
+                        midBitmap.recycle()
+                        midBitmap_half.recycle()
+
+                        // 最終結果をリストに追加
+                        //val finalBmp = scaled
+
+                        // RGB_565への変換をする場合
                         val finalBmp = scaled.copy(Bitmap.Config.RGB_565, false)
                         if (scaled != finalBmp) scaled.recycle()
+                        // -----------------------------------------------------------
+
                         cropped.recycle()
 
                         synchronized(imageBuffer) {
@@ -425,7 +473,11 @@ class JemiCaptureService : Service() {
         val canvas = Canvas(res)
         canvas.drawColor(Color.BLACK)
 
-        val paint = Paint().apply { isFilterBitmap = true; isDither = true }
+        val paint = Paint().apply {
+            isFilterBitmap = true
+            isAntiAlias = true
+            isDither = true
+        }
         val borderPaint = Paint().apply { color = Color.GREEN; strokeWidth = 1f }
 
         synchronized(imageBuffer) {
@@ -561,7 +613,7 @@ class JemiCaptureService : Service() {
             val imageFile = File(storageDir, fileName)
             val outputStream = FileOutputStream(imageFile)
 
-            // 圧縮率60%で保存！API送信時と全く同じ条件だよっ♪
+            // JPEG圧縮率
             bitmap.compress(Bitmap.CompressFormat.JPEG, 60, outputStream)
             outputStream.flush()
             outputStream.close()
