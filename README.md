@@ -1,10 +1,13 @@
+![Jemi-Live](image/jemi_live.jpg)
+
 # Jemi-Live AI実況アプリ
 
 ## ■機能
 
 画面上のゲームシーン（主にレトロゲーム）をGeminiモデルのAPIを使用して実況、翻訳、攻略、解説、情報、裏話をしてくれるAndroidアプリ。AYN Thor用にカスタマイズされた2画面仕様（上画面はゲーム画面、下画面は実況用コックピット画面）に対応。
 
-![image1](/image/image1.jpg)
+![image1](image/image1.jpg)
+
 
 ## ■仕様
 
