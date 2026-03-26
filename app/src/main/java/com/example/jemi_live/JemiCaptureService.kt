@@ -4,11 +4,16 @@ import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
-import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.ServiceInfo
-import android.graphics.*
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Matrix
+import android.graphics.Paint
+import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.media.ImageReader
@@ -19,7 +24,6 @@ import android.os.Environment
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
-import android.util.DisplayMetrics
 import android.util.Log
 import android.view.Display
 import android.view.Gravity
@@ -36,6 +40,9 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.core.content.IntentCompat
+import androidx.core.content.edit
+import androidx.core.graphics.createBitmap
+import androidx.core.view.isVisible
 import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.GenerateContentResponse
 import com.google.ai.client.generativeai.type.content
@@ -55,13 +62,12 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
-import androidx.core.graphics.createBitmap
 
 /**
  * JemiCaptureService (v3.2.6 - Stable Expansion without Query)
- * - [Restored] v3.2.3をベースに、ログ出力・リトライ処理・3段階スケーリングを完全維持。
- * - [Feature] ✨ボタンによる拡張アクションメニュー（翻訳、攻略、情報、解説、裏話）を安定稼働。
- * - [Omit] 日本語IMEで競合が発生した「✏️質問機能（Custom Query）」を一旦削除し安定化。
+ * - (Restored) v3.2.3をベースに、ログ出力・リトライ処理・3段階スケーリングを完全維持。
+ * - (Feature) ✨ボタンによる拡張アクションメニュー（翻訳、攻略、情報、解説、裏話）を安定稼働。
+ * - (Omit) 日本語IMEで競合が発生した「✏️質問機能（Custom Query）」を一旦削除し安定化。
  */
 class JemiCaptureService : Service() {
     private lateinit var mainWindowManager: WindowManager
@@ -98,7 +104,7 @@ class JemiCaptureService : Service() {
     private var currentPreviewBitmap: Bitmap? = null
 
     private val imageBuffer = mutableListOf<Bitmap>()
-    private val MAX_BUFFER_SIZE = 6
+    private val maxBufferSize = 6
 
     private var autoCaptureJob: Job? = null
     private lateinit var jemiVoice: JemiVoiceManager
@@ -118,7 +124,7 @@ class JemiCaptureService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        prefs = getSharedPreferences("JemiSettings", Context.MODE_PRIVATE)
+        prefs = getSharedPreferences("JemiSettings", MODE_PRIVATE)
         jemiVoice = JemiVoiceManager(this)
 
         captureIntervalMs = prefs.getLong("capture_interval", 2000L)
@@ -128,26 +134,15 @@ class JemiCaptureService : Service() {
         setupFloatingWindows()
     }
 
-    /**
-     * 🕵️ 実行環境がエミュレータかどうかを執拗にチェックするよっ！
-     */
-    fun isEmulatorBuildProperties(): Boolean {
-        return (Build.BRAND.startsWith("generic") && Build.DEVICE.startsWith("generic"))
-                || Build.FINGERPRINT.startsWith("generic")
-                || Build.FINGERPRINT.startsWith("unknown")
-                || Build.HARDWARE.contains("goldfish")
+    fun isAndroidStudioEmulator(): Boolean {
+        return Build.HARDWARE.contains("goldfish")
                 || Build.HARDWARE.contains("ranchu")
                 || Build.MODEL.contains("google_sdk")
                 || Build.MODEL.contains("Emulator")
                 || Build.MODEL.contains("Android SDK built for x86")
-                || Build.MANUFACTURER.contains("Genymotion")
                 || Build.PRODUCT.contains("sdk_gphone")
                 || Build.PRODUCT.contains("google_sdk")
                 || Build.PRODUCT.contains("sdk")
-                || Build.PRODUCT.contains("sdk_x86")
-                || Build.PRODUCT.contains("vbox86p")
-                || Build.PRODUCT.contains("emulator")
-                || Build.PRODUCT.contains("simulator")
     }
 
     private fun setupFloatingWindows() {
@@ -160,27 +155,25 @@ class JemiCaptureService : Service() {
         }
 
         if (!isSingleMode) {
-            val displayManager = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+            val displayManager = getSystemService(DISPLAY_SERVICE) as DisplayManager
             val displays = displayManager.displays
             for (display in displays) {
                 if (display.displayId != Display.DEFAULT_DISPLAY) {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                        val displayContext = createDisplayContext(display)
-                        val windowContext = displayContext.createWindowContext(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, null)
-                        uiWindowManager = windowContext.getSystemService(WindowManager::class.java)
-                    }
+                    val displayContext = createDisplayContext(display)
+                    val windowContext = displayContext.createWindowContext(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, null)
+                    uiWindowManager = windowContext.getSystemService(WindowManager::class.java)
                     break
                 }
             }
         }
 
-        val mainMetrics = DisplayMetrics()
-        mainWindowManager.defaultDisplay.getRealMetrics(mainMetrics)
-        val screenW = mainMetrics.widthPixels
-        val screenH = mainMetrics.heightPixels
-
-        var frameW = prefs.getInt("frame_w", (screenH * 4 / 3).coerceAtMost(screenW))
-        var frameH = prefs.getInt("frame_h", screenH.coerceAtMost((frameW * 3 / 4)))
+        val wm = getSystemService(WINDOW_SERVICE) as WindowManager
+        val windowMetrics = wm.currentWindowMetrics
+        val bounds = windowMetrics.bounds
+        val screenW = bounds.width()
+        val screenH = bounds.height()
+        val frameW = prefs.getInt("frame_w", (screenH * 4 / 3).coerceAtMost(screenW))
+        val frameH = prefs.getInt("frame_h", screenH.coerceAtMost((frameW * 3 / 4)))
 
         frameParams = WindowManager.LayoutParams(
             frameW, frameH,
@@ -209,14 +202,16 @@ class JemiCaptureService : Service() {
 
         if (isSingleMode) setupSingleModeUI() else setupDualModeCockpitUI()
 
-        setupDraggable(recognitionFrameView, frameParams, mainWindowManager, true, false, true) {
+        setupDraggable(recognitionFrameView, frameParams, mainWindowManager, iT=true, iB=false, iL=true) {
             if (isFrameAdjustMode) { updateCropCache(); saveCoords("frame", frameParams) }
         }
 
         startForegroundService()
 
-        // 👻 エミュレータ環境なら、心臓マッサージ（画面更新強制）を開始するよっ！
-        if (isEmulatorBuildProperties()) { setupForceUpdateView() }
+        // デバッグエミュレータ環境では強制的に画面の更新判定を発生させる
+        if (isAndroidStudioEmulator()&& BuildConfig.DEBUG) {
+            setupForceUpdateView() // ステルス・ハートビート起動
+        }
 
         handler.postDelayed({ updateCropCache() }, 500)
     }
@@ -316,7 +311,7 @@ class JemiCaptureService : Service() {
         btnEdit.setOnClickListener { toggleFrameAdjustMode() }
         btnTogglePreview?.setOnClickListener {
             if (singlePreviewView != null) {
-                singlePreviewView!!.visibility = if (singlePreviewView!!.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+                singlePreviewView!!.visibility = if (singlePreviewView!!.isVisible) View.GONE else View.VISIBLE
             }
         }
         setupButtonActions(btnClose)
@@ -340,11 +335,11 @@ class JemiCaptureService : Service() {
         tvCommentary = singleCommentaryView!!.findViewById(R.id.tv_floating_commentary)
 
         uiWindowManager.addView(singleCommentaryView, commParams)
-        setupDraggable(singleControlView!!, controlParams, uiWindowManager, false, true, false) { saveCoords("ctrl", controlParams) }
-        setupDraggable(singleCommentaryView!!, commParams, uiWindowManager, true, false, false) { saveCoords("comm", commParams) }
+        setupDraggable(singleControlView!!, controlParams, uiWindowManager, iT=false, iB=true, iL=false) { saveCoords("ctrl", controlParams) }
+        setupDraggable(singleCommentaryView!!, commParams, uiWindowManager, iT=true, iB=false, iL=false) { saveCoords("comm", commParams) }
     }
 
-    @SuppressLint("InflateParams")
+    @SuppressLint("InflateParams", "DefaultLocale")
     private fun setupDualModeCockpitUI() {
         val cockpitParams = WindowManager.LayoutParams(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT).apply { gravity = Gravity.CENTER }
         dualCockpitView = LayoutInflater.from(this).inflate(R.layout.layout_cockpit_dashboard, null)
@@ -383,7 +378,7 @@ class JemiCaptureService : Service() {
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
 
             override fun onStopTrackingTouch(seekBar: SeekBar?) {
-                prefs.edit().putLong("capture_interval", captureIntervalMs).apply()
+                prefs.edit { putLong("capture_interval", captureIntervalMs) }
                 Log.d("Jemi-Live", "⏱️ 撮影間隔を ${captureIntervalMs}ms に変更したよっ！")
             }
         })
@@ -443,6 +438,7 @@ class JemiCaptureService : Service() {
         Log.d("Jemi-Live", "✨ アクション予約: $type (高解像度モード)")
     }
 
+    @SuppressLint("SetTextI18n")
     private fun updateUiTitles() {
         val suffix = if (isDebugMode) " (DEBUG MODE)" else ""
         dualCockpitView?.findViewById<TextView>(R.id.tv_cockpit_title)?.text = "JEMI-LIVE COCKPIT$suffix"
@@ -479,11 +475,33 @@ class JemiCaptureService : Service() {
     }
 
     private fun setupCapture() {
-        val metrics = DisplayMetrics()
-        mainWindowManager.defaultDisplay.getRealMetrics(metrics)
-        imageReader = ImageReader.newInstance(metrics.widthPixels, metrics.heightPixels, PixelFormat.RGBA_8888, 2)
-        virtualDisplay = mediaProjection?.createVirtualDisplay("JemiCapture", metrics.widthPixels, metrics.heightPixels, metrics.densityDpi, DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, imageReader?.surface, null, null)
+        // 現在のウィンドウのサイズ（幅・高さ）を取得
+        val wm = getSystemService(WINDOW_SERVICE) as WindowManager
+        val windowMetrics = wm.currentWindowMetrics
+        val bounds = windowMetrics.bounds
+        val width = bounds.width()
+        val height = bounds.height()
+
+        // 画面の密度（DPI）を取得（Resourcesから取得するのが今 2026/03/26 現在の主流）
+        val density = resources.configuration.densityDpi
+
+        // ImageReader と VirtualDisplay を作成
+        // ※ width, height, density を直接使う
+        imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
+
+        virtualDisplay = mediaProjection?.createVirtualDisplay(
+            "JemiCapture",
+            width,
+            height,
+            density, // ここに取得した密度を入れる
+            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+            imageReader?.surface,
+            null,
+            null
+        )
+
         startAutoCaptureTimer()
+
         imageReader?.setOnImageAvailableListener({ reader ->
             val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
             if (!isCaptureRequested) { image.close(); return@setOnImageAvailableListener }
@@ -498,7 +516,10 @@ class JemiCaptureService : Service() {
             try {
                 image.use { img ->
                     val plane = img.planes[0]
-                    val fullBitmap = Bitmap.createBitmap(metrics.widthPixels + (plane.rowStride - plane.pixelStride * metrics.widthPixels) / plane.pixelStride, img.height, Bitmap.Config.ARGB_8888)
+                    val fullBitmap = createBitmap(
+                        width + (plane.rowStride - plane.pixelStride * width) / plane.pixelStride,
+                        img.height
+                    )
                     fullBitmap.copyPixelsFromBuffer(plane.buffer)
                     if (captureAreaMode == "manual") updateCropCache()
 
@@ -548,10 +569,10 @@ class JemiCaptureService : Service() {
                         }
 
                         // --- ステップ2: 中間サイズ（1/4）への縮小 ---
-                        val midWidth_half = midWidth / 2
-                        val midHeight_half = midHeight / 2
-                        val midBitmap_half = createBitmap(midWidth_half, midHeight_half)
-                        Canvas(midBitmap_half).apply {
+                        val midWidthHalf = midWidth / 2
+                        val midHeightHalf = midHeight / 2
+                        val midBitmapHalf = createBitmap(midWidthHalf, midHeightHalf)
+                        Canvas(midBitmapHalf).apply {
                             val matrix = Matrix().apply { setScale(0.5f, 0.5f) }
                             drawBitmap(midBitmap, matrix, highQualityPaint)
                         }
@@ -559,15 +580,15 @@ class JemiCaptureService : Service() {
                         // --- ステップ3: 最終ターゲットサイズへの縮小 ---
                         val scaled = createBitmap(targetTileW, targetTileH)
                         Canvas(scaled).apply {
-                            val scaleX = targetTileW.toFloat() / midWidth_half
-                            val scaleY = targetTileH.toFloat() / midHeight_half
+                            val scaleX = targetTileW.toFloat() / midWidthHalf
+                            val scaleY = targetTileH.toFloat() / midHeightHalf
                             val matrix = Matrix().apply { setScale(scaleX, scaleY) }
-                            drawBitmap(midBitmap_half, matrix, highQualityPaint)
+                            drawBitmap(midBitmapHalf, matrix, highQualityPaint)
                         }
 
                         // 中間ビットマップはもう不要なのでメモリ解放
                         midBitmap.recycle()
-                        midBitmap_half.recycle()
+                        midBitmapHalf.recycle()
 
                         // RGB_565への変換
                         val finalBmp = scaled.copy(Bitmap.Config.RGB_565, false)
@@ -590,7 +611,7 @@ class JemiCaptureService : Service() {
                             // 通常の実況バッファ追加
                             synchronized(imageBuffer) {
                                 imageBuffer.add(finalBmp)
-                                if (imageBuffer.size > MAX_BUFFER_SIZE) {
+                                if (imageBuffer.size > maxBufferSize) {
                                     val removed = imageBuffer.removeAt(0)
                                     removed.recycle()
                                 }
@@ -616,7 +637,7 @@ class JemiCaptureService : Service() {
         val canvasW = 512
         val canvasH = if (captureAreaMode == "16_9") tileH * 3 + 2 else 512
 
-        val res = Bitmap.createBitmap(canvasW, canvasH, Bitmap.Config.RGB_565)
+        val res = createBitmap(canvasW, canvasH, Bitmap.Config.RGB_565)
         val canvas = Canvas(res)
         canvas.drawColor(Color.BLACK)
 

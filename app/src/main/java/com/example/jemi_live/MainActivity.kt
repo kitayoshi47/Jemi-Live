@@ -1,10 +1,7 @@
 package com.example.jemi_live
 
-import android.app.Activity
-import android.content.Context
 import android.content.Intent
 import android.media.projection.MediaProjectionManager
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
@@ -16,11 +13,12 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
+import androidx.core.net.toUri
 
 /**
  * Jemi-Live 準備室 (v3.0.7)
- * - [Fix] オーバーレイ権限（他のアプリの上に重ねて表示）のチェックを強化。
- * - [Update] 各種設定の保存とMediaProjectionの開始を担当。
+ * - (Fix) オーバーレイ権限（他のアプリの上に重ねて表示）のチェックを強化。
+ * - (Update) 各種設定の保存とMediaProjectionの開始を担当。
  */
 class MainActivity : AppCompatActivity() {
     private lateinit var etApiKey: EditText
@@ -32,8 +30,8 @@ class MainActivity : AppCompatActivity() {
 
     // MediaProjection（画面キャプチャ）の許可リクエスト結果を受け取るランチャーだよっ
     private val captureLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            val prefs = getSharedPreferences("JemiSettings", Context.MODE_PRIVATE)
+        if (result.resultCode == RESULT_OK) {
+            val prefs = getSharedPreferences("JemiSettings", MODE_PRIVATE)
 
             val apiKey = etApiKey.text.toString()
             val omajinai = etOmajinai.text.toString()
@@ -85,22 +83,23 @@ class MainActivity : AppCompatActivity() {
         setupPermissions()
 
         // 保存されている設定を読み込むねっ♪
-        val prefs = getSharedPreferences("JemiSettings", Context.MODE_PRIVATE)
+        val prefs = getSharedPreferences("JemiSettings", MODE_PRIVATE)
         etApiKey.setText(prefs.getString("api_key", ""))
         etOmajinai.setText(prefs.getString("omajinai", ""))
         cbDebugMode.isChecked = prefs.getBoolean("last_debug_state", false)
 
         val lastDisplayModeId = prefs.getInt("last_display_mode_id", -1)
-        if (lastDisplayModeId != -1) try { rgDisplayMode.check(lastDisplayModeId) } catch (e: Exception) {}
+        if (lastDisplayModeId != -1) try { rgDisplayMode.check(lastDisplayModeId) } catch (_: Exception) {}
 
         val lastCaptureAreaId = prefs.getInt("last_capture_area_id", -1)
-        if (lastCaptureAreaId != -1) try { rgCaptureArea.check(lastCaptureAreaId) } catch (e: Exception) {}
+        if (lastCaptureAreaId != -1) try { rgCaptureArea.check(lastCaptureAreaId) } catch (_: Exception) {}
 
         findViewById<Button>(R.id.btn_start_live).setOnClickListener {
             // 起動直前にもう一度オーバーレイ権限をチェック！
             if (!Settings.canDrawOverlays(this)) {
                 Toast.makeText(this, "「他のアプリの上に重ねて表示」を許可してね！🌸", Toast.LENGTH_LONG).show()
-                val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
+                val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    "package:$packageName".toUri())
                 startActivity(intent)
                 return@setOnClickListener
             }
@@ -116,7 +115,8 @@ class MainActivity : AppCompatActivity() {
     private fun setupPermissions() {
         // オーバーレイ権限（WindowManager用）
         if (!Settings.canDrawOverlays(this)) {
-            val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
+            val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                "package:$packageName".toUri())
             startActivity(intent)
         }
 
