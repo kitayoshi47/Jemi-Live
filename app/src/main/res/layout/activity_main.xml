@@ -39,7 +39,7 @@
             android:id="@+id/et_api_key"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="AIzaSy..."
+            android:hint="API キーを入力してください"
             android:textColor="#FFFFFF"
             android:textColorHint="#888888"
             android:inputType="textPassword"

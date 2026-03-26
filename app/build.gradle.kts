@@ -54,7 +54,8 @@ android {
 }
 
 dependencies {
-    implementation(libs.generativeai) // 2026年最新のSDKだよっ！
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    implementation(libs.generativeai)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.material)

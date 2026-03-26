@@ -74,7 +74,7 @@ class JemiCaptureService : Service() {
     private lateinit var uiWindowManager: WindowManager
     private lateinit var prefs: SharedPreferences
     private val handler = Handler(Looper.getMainLooper())
-
+    private lateinit var apiKeyManager: ApiKeyManager
     private lateinit var recognitionFrameView: FrameLayout
     private lateinit var frameParams: WindowManager.LayoutParams
     private lateinit var tvCommentary: TextView
@@ -125,6 +125,7 @@ class JemiCaptureService : Service() {
     override fun onCreate() {
         super.onCreate()
         prefs = getSharedPreferences("JemiSettings", MODE_PRIVATE)
+        apiKeyManager = ApiKeyManager(this)
         jemiVoice = JemiVoiceManager(this)
 
         captureIntervalMs = prefs.getLong("capture_interval", 2000L)
@@ -738,7 +739,10 @@ class JemiCaptureService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val k = intent?.getStringExtra("API_KEY") ?: prefs.getString("api_key", "") ?: ""
+        val k = intent?.getStringExtra("API_KEY")
+            ?: apiKeyManager.getApiKey()
+            ?: ""
+
         customOmajinai = intent?.getStringExtra("OMAJINAI") ?: prefs.getString("omajinai", "") ?: ""
         isDebugMode = intent?.getBooleanExtra("IS_DEBUG", false) ?: prefs.getBoolean("last_debug_state", false)
         updateUiTitles()
