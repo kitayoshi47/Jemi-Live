@@ -39,6 +39,14 @@ class JemiVoiceManager(context: Context) : TextToSpeech.OnInitListener {
         }
     }
 
+    /**
+     * 🕵️ あたしが今喋っているかどうかを判定するメソッドだよっ！
+     * 自動実況（Liveモード）のタイミング制御に使うのですよっ♪
+     */
+    fun isSpeaking(): Boolean {
+        return isReady && tts.isSpeaking
+    }
+
     // アプリが終わる時にお片付けするメソッドっ！
     fun shutdown() {
         tts.stop()

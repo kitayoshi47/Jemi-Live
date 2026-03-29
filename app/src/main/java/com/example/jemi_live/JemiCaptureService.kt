@@ -25,6 +25,7 @@ import android.os.Environment
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.util.DisplayMetrics
 import android.util.Log
 import android.view.Display
 import android.view.Gravity
@@ -36,9 +37,11 @@ import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
+import android.widget.ToggleButton
 import androidx.core.app.NotificationCompat
 import androidx.core.content.IntentCompat
 import androidx.core.content.edit
@@ -66,17 +69,15 @@ import kotlin.math.max
 import kotlin.math.min
 import com.jemi.live.logic.TicketManager
 import kotlinx.coroutines.flow.collect
-
-// ⚡️ JSONパース用のモデルとライブラリ
 import com.jemi.live.model.JemiResponse
 import kotlinx.serialization.json.Json
 
 /**
- * JemiCaptureService (v3.3.1 - Full Integration)
- * - [Fix] 省略を一切排除した完全なソースコード。
- * - [Feature] lastSummaryによる短期記憶の実装。
- * - [Improve] 感嘆詞（わぁ！等）の多用を控え、変化に注目するプロンプト・チューニング。
- * - [Restored] 既存の3段階スケーリング、ステルス・ハートビート、チケットシステムを完全維持。
+ * JemiCaptureService (v3.4.2 - Final Integration)
+ * - [Feature] Liveモード(自動実況)を搭載。タイマーとProgressBarによる制御。
+ * - [Feature] JSONパースによるあらすじ記憶(lastSummary)を完全維持。
+ * - [Feature] TicketManagerによるAIリソース管理。
+ * - [Restored] オリジナルのログ出力、DisplayMetrics、スケーリングロジックを完全維持。
  */
 class JemiCaptureService : Service() {
     private lateinit var mainWindowManager: WindowManager
@@ -99,15 +100,16 @@ class JemiCaptureService : Service() {
 
     // 🎫 チケット管理
     private val ticketManager = TicketManager()
-
-    // 🧠 あたしの「記憶（あらすじ）」を保存する変数だよっ！
     private var lastSummary: String = ""
+    private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true }
 
-    // ⚡️ JSONパース設定
-    private val json = Json {
-        ignoreUnknownKeys = true
-        coerceInputValues = true
-    }
+    // 🛰️ LIVEモード用の変数
+    private var isLiveModeEnabled = false
+    private var liveIntervalSec = 15
+    private var liveCountdownMs = 15000L
+    private var liveModeJob: Job? = null
+    private var tbLiveSwitch: ToggleButton? = null
+    private var pbLiveCountdown: ProgressBar? = null
 
     private var llMiniWindow: View? = null
 
@@ -154,14 +156,18 @@ class JemiCaptureService : Service() {
         jemiVoice = JemiVoiceManager(this)
 
         captureIntervalMs = prefs.getLong("capture_interval", 2000L)
+        liveIntervalSec = prefs.getInt("live_interval_sec", 15)
+        liveCountdownMs = liveIntervalSec * 1000L
 
         mainWindowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         uiWindowManager = mainWindowManager
 
-        // 🎫 チケットシステムをスタンバイ！
+        // 🎫 チケットシステムの起動
         ticketManager.startRefillSystem()
 
         setupFloatingWindows()
+        // 🛰️ LIVEモード監視タイマーを起動
+        startLiveModeTimer()
     }
 
     /**
@@ -341,7 +347,7 @@ class JemiCaptureService : Service() {
         btnEdit.setOnClickListener { toggleFrameAdjustMode() }
         btnTogglePreview?.setOnClickListener {
             if (singlePreviewView != null) {
-                singlePreviewView!!.visibility = if (singlePreviewView!!.isVisible) View.GONE else View.VISIBLE
+                singlePreviewView!!.visibility = if (singlePreviewView!!.visibility == View.VISIBLE) View.GONE else View.VISIBLE
             }
         }
         setupButtonActions(btnClose)
@@ -398,6 +404,31 @@ class JemiCaptureService : Service() {
             }
         }
 
+        // 🛰️ LIVEモードUI
+        tbLiveSwitch = dualCockpitView!!.findViewById(R.id.tb_live_switch)
+        pbLiveCountdown = dualCockpitView!!.findViewById(R.id.pb_live_countdown)
+        val sbLiveInterval = dualCockpitView!!.findViewById<SeekBar>(R.id.sb_live_interval)
+        val tvLiveLabel = dualCockpitView!!.findViewById<TextView>(R.id.tv_live_interval_label)
+
+        tbLiveSwitch?.setOnCheckedChangeListener { _, isChecked ->
+            isLiveModeEnabled = isChecked
+            resetLiveCountdown()
+        }
+
+        sbLiveInterval.progress = liveIntervalSec - 10
+        tvLiveLabel.text = "実況間隔: ${liveIntervalSec}s"
+        sbLiveInterval.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                liveIntervalSec = 10 + progress
+                tvLiveLabel.text = "実況間隔: ${liveIntervalSec}s"
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {
+                prefs.edit().putInt("live_interval_sec", liveIntervalSec).apply()
+                resetLiveCountdown()
+            }
+        })
+
         llMiniWindow = dualCockpitView!!.findViewById(R.id.ll_mini_window)
 
         setupSpecialMenuListeners()
@@ -430,6 +461,55 @@ class JemiCaptureService : Service() {
         uiWindowManager.addView(dualCockpitView, cockpitParams)
     }
 
+    private fun resetLiveCountdown() {
+        liveCountdownMs = liveIntervalSec * 1000L
+        pbLiveCountdown?.progress = 100
+    }
+
+    /**
+     * 🛰️ 自動実況タイマーの実装だよっ！
+     */
+    private fun startLiveModeTimer() {
+        liveModeJob = serviceScope.launch {
+            while (isActive) {
+                if (isLiveModeEnabled && !isGeminiThinking) {
+                    delay(100)
+                    liveCountdownMs -= 100
+
+                    val progress = (liveCountdownMs.toFloat() / (liveIntervalSec * 1000) * 100).toInt()
+                    pbLiveCountdown?.progress = progress.coerceIn(0, 100)
+
+                    if (liveCountdownMs <= 0) {
+                        // 🤫 喋り終わるのを待つのですよっ
+                        if (jemiVoice.isSpeaking()) {
+                            continue
+                        }
+
+                        // 🎤 2秒の余韻っ
+                        delay(2000)
+
+                        // 自動送信（チケット消費なし）
+                        triggerLiveCommentary()
+                        resetLiveCountdown()
+                    }
+                } else {
+                    delay(500)
+                }
+            }
+        }
+    }
+
+    private fun triggerLiveCommentary() {
+        if (imageBuffer.isEmpty()) return
+        val g = createGatchankoBitmap(imageBuffer.toList()) ?: return
+        lastCaptureTime = System.currentTimeMillis()
+        currentPreviewBitmap?.recycle()
+        currentPreviewBitmap = g
+        previewView.setImageBitmap(g)
+        updateCaptureButtonState()
+        getJemiCommentary(g)
+    }
+
     private fun updateTicketUI(count: Int) {
         val tickets = listOf(tvTicket1, tvTicket2, tvTicket3, tvTicket4)
         tickets.forEachIndexed { index, textView ->
@@ -459,6 +539,9 @@ class JemiCaptureService : Service() {
             dualCockpitView?.findViewById<Button>(id)?.setOnClickListener {
                 if (checkCooldownOnlyThinking()) return@setOnClickListener
 
+                // 🕵️ ヨチオさんの指示：手動割り込み時はLIVE解除
+                disableLiveMode()
+
                 if (ticketManager.consumeTicket()) {
                     triggerHighResAction(type)
                     closeAllOverlays()
@@ -467,6 +550,12 @@ class JemiCaptureService : Service() {
                 }
             }
         }
+    }
+
+    private fun disableLiveMode() {
+        isLiveModeEnabled = false
+        tbLiveSwitch?.isChecked = false
+        resetLiveCountdown()
     }
 
     private fun closeAllOverlays() {
@@ -479,7 +568,7 @@ class JemiCaptureService : Service() {
      */
     private fun checkCooldownOnlyThinking(): Boolean {
         if (isGeminiThinking) {
-            Toast.makeText(this, "ジェミ、まだ考え中だよぉ🤔 終わるまで待ってねっ♪", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "ジェミ、まだ考え中だよぉ🤔", Toast.LENGTH_SHORT).show()
             return true
         }
         return false
@@ -701,6 +790,8 @@ class JemiCaptureService : Service() {
         btnCapture.setOnClickListener {
             if (checkCooldownOnlyThinking()) return@setOnClickListener
 
+            disableLiveMode()
+
             if (imageBuffer.isEmpty()) {
                 Toast.makeText(this, "画像がまだ撮れてないよぉ💦少し待ってね！", Toast.LENGTH_SHORT).show(); return@setOnClickListener
             }
@@ -804,6 +895,7 @@ class JemiCaptureService : Service() {
         super.onDestroy()
         // 🎫 チケットシステムを停止
         ticketManager.stopRefillSystem()
+        liveModeJob?.cancel()
 
         singleControlView?.let { uiWindowManager.removeView(it) }; singleCommentaryView?.let { uiWindowManager.removeView(it) }
         singlePreviewView?.let { uiWindowManager.removeView(it) }; dualCockpitView?.let { uiWindowManager.removeView(it) }
@@ -921,8 +1013,7 @@ class JemiCaptureService : Service() {
     }
 
     /**
-     * 🧠 コンテキスト強化版の実況処理（プロンプト・リファイン版）
-     * ヨチオさんのアドバイスに基づき、感嘆詞の多用を制限しつつ変化を捉えるようにしたよっ！
+     * 🧠 JSONパース & 短期記憶対応版の実況処理（プロンプト・リファイン済み！）
      */
     private fun getJemiCommentary(b: Bitmap) {
         val o = java.io.ByteArrayOutputStream(); b.compress(Bitmap.CompressFormat.JPEG, 60, o)
@@ -932,7 +1023,7 @@ class JemiCaptureService : Service() {
         isGeminiThinking = true
         updateCaptureButtonState()
         val startTime = System.currentTimeMillis()
-        Log.d("Jemi-API", "🚀 Gemini API 送信開始（Context Refinement Mode）...")
+        Log.d("Jemi-API", "🚀 Gemini API 送信開始...")
 
         if (isDebugMode) {
             val d = if (isTranslationEnabled) "デバッグモード中だよっ！翻訳モードもオンだねっ！ (DEBUG & TRANSLATE OK!)" else "ヨチオさん、デバッグモードでの動作確認中だよっ🌸"
@@ -963,7 +1054,7 @@ class JemiCaptureService : Service() {
                         最新の画像状況を見て、簡潔にテンション高く実況して！$memoryPrompt$translatePrompt
                         回答は必ず以下のJSON形式のみで出力して。
                         {
-                          "commentary": "実況テキスト（感嘆詞の多用を控え、毎回異なる表現を使うこと。最大3行、100文字以内）",
+                          "commentary": "実況テキスト（感嘆詞の多用を控え、毎回異なる表現を使うこと。最大4行、140文字以内）",
                           "emotion": "感情（excited, calm, surprised, normalのいずれか）",
                           "summary": "現在の状況の短いあらすじ（ワールド番号、敵の出現、アイテム取得状況、地形の変化など、次回の実況に役立つ具体的な情報）"
                         }

@@ -18,7 +18,7 @@
             android:orientation="horizontal"
             android:baselineAligned="false">
 
-            <!-- 📢 左側：実況テキストエリア（スクロール対応っ！） -->
+            <!-- 📢 左側：実況テキストエリア -->
             <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
@@ -65,7 +65,7 @@
                 </ScrollView>
             </LinearLayout>
 
-            <!-- 🎛️ 右側：コントロールパネル（160dp固定推奨エリア） -->
+            <!-- 🎛️ 右側：コントロールパネル（160dp固定） -->
             <LinearLayout
                 android:layout_width="160dp"
                 android:layout_height="match_parent"
@@ -73,7 +73,7 @@
                 android:layout_marginStart="12dp"
                 android:gravity="top|center_horizontal">
 
-                <!-- 🔋 チケット表示エリア（新規追加！） -->
+                <!-- 🔋 チケット表示エリア -->
                 <LinearLayout
                     android:id="@+id/ll_cockpit_tickets"
                     android:layout_width="match_parent"
@@ -83,39 +83,10 @@
                     android:background="#333333"
                     android:padding="4dp"
                     android:layout_marginBottom="8dp">
-
-                    <TextView
-                        android:id="@+id/tv_ticket_1"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="🔋"
-                        android:textSize="18sp"
-                        android:alpha="1.0"
-                        android:layout_margin="2dp"/>
-                    <TextView
-                        android:id="@+id/tv_ticket_2"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="🔋"
-                        android:textSize="18sp"
-                        android:alpha="1.0"
-                        android:layout_margin="2dp"/>
-                    <TextView
-                        android:id="@+id/tv_ticket_3"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="🔋"
-                        android:textSize="18sp"
-                        android:alpha="1.0"
-                        android:layout_margin="2dp"/>
-                    <TextView
-                        android:id="@+id/tv_ticket_4"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="🔋"
-                        android:textSize="18sp"
-                        android:alpha="1.0"
-                        android:layout_margin="2dp"/>
+                    <TextView android:id="@+id/tv_ticket_1" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="🔋" android:textSize="18sp" android:layout_margin="2dp"/>
+                    <TextView android:id="@+id/tv_ticket_2" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="🔋" android:textSize="18sp" android:layout_margin="2dp"/>
+                    <TextView android:id="@+id/tv_ticket_3" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="🔋" android:textSize="18sp" android:layout_margin="2dp"/>
+                    <TextView android:id="@+id/tv_ticket_4" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="🔋" android:textSize="18sp" android:layout_margin="2dp"/>
                 </LinearLayout>
 
                 <ImageView
@@ -127,12 +98,61 @@
                     android:adjustViewBounds="true"
                     android:scaleType="fitCenter" />
 
-                <!-- ⏱️ 撮影間隔スライダー -->
+                <!-- 🛰️ LIVEモードコントロール（新規！） -->
                 <LinearLayout
                     android:layout_width="140dp"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
-                    android:layout_marginBottom="12dp"
+                    android:background="#2A2A2A"
+                    android:padding="6dp"
+                    android:layout_marginBottom="8dp">
+
+                    <ToggleButton
+                        android:id="@+id/tb_live_switch"
+                        android:layout_width="match_parent"
+                        android:layout_height="36dp"
+                        android:textOn="LIVE ON"
+                        android:textOff="LIVE OFF"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:background="@drawable/bg_action_button_dark"
+                        android:textColor="#FFFFFF" />
+
+                    <TextView
+                        android:id="@+id/tv_live_interval_label"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="実況間隔: 15s"
+                        android:textColor="#FF88AA"
+                        android:textSize="10sp"
+                        android:layout_marginTop="4dp"
+                        android:layout_gravity="center" />
+
+                    <SeekBar
+                        android:id="@+id/sb_live_interval"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:max="20"
+                        android:progress="5"
+                        android:progressTint="#FF88AA"
+                        android:thumbTint="#FF88AA" />
+
+                    <ProgressBar
+                        android:id="@+id/pb_live_countdown"
+                        style="?android:attr/progressBarStyleHorizontal"
+                        android:layout_width="match_parent"
+                        android:layout_height="4dp"
+                        android:layout_marginTop="4dp"
+                        android:progressTint="#00FF00"
+                        android:progress="100" />
+                </LinearLayout>
+
+                <!-- ⏱️ 撮影間隔（バッファ用） -->
+                <LinearLayout
+                    android:layout_width="140dp"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:layout_marginBottom="8dp"
                     android:gravity="center">
                     <TextView
                         android:id="@+id/tv_cockpit_interval"
@@ -140,58 +160,27 @@
                         android:layout_height="wrap_content"
                         android:text="撮影: 2.0s"
                         android:textColor="#FFFFFF"
-                        android:textSize="11sp"
-                        android:textStyle="bold" />
+                        android:textSize="10sp" />
                     <SeekBar
                         android:id="@+id/sb_cockpit_interval"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:max="20"
                         android:progress="10"
-                        android:progressTint="#FF88AA"
-                        android:thumbTint="#FF88AA" />
+                        android:progressTint="#888888"
+                        android:thumbTint="#888888" />
                 </LinearLayout>
 
+                <!-- ボタン群 -->
                 <LinearLayout
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
                     android:gravity="center">
-                    <Button
-                        android:id="@+id/btn_cockpit_capture"
-                        android:layout_width="56dp"
-                        android:layout_height="56dp"
-                        android:text="📸"
-                        android:textSize="20sp"
-                        android:background="@drawable/bg_action_button_dark"
-                        android:stateListAnimator="@null" />
-                    <Button
-                        android:id="@+id/btn_cockpit_special"
-                        android:layout_width="44dp"
-                        android:layout_height="44dp"
-                        android:layout_marginStart="8dp"
-                        android:text="✨"
-                        android:textSize="16sp"
-                        android:background="@drawable/bg_action_button_blue"
-                        android:stateListAnimator="@null" />
-                    <Button
-                        android:id="@+id/btn_cockpit_edit_frame"
-                        android:layout_width="44dp"
-                        android:layout_height="44dp"
-                        android:layout_marginStart="8dp"
-                        android:text="🔧"
-                        android:textSize="16sp"
-                        android:background="@drawable/bg_action_button_blue"
-                        android:stateListAnimator="@null" />
-                    <Button
-                        android:id="@+id/btn_cockpit_close"
-                        android:layout_width="44dp"
-                        android:layout_height="44dp"
-                        android:layout_marginStart="8dp"
-                        android:text="❌"
-                        android:textSize="14sp"
-                        android:background="@drawable/bg_action_button_red"
-                        android:stateListAnimator="@null" />
+                    <Button android:id="@+id/btn_cockpit_capture" android:layout_width="48dp" android:layout_height="48dp" android:text="📸" android:background="@drawable/bg_action_button_dark" android:stateListAnimator="@null" />
+                    <Button android:id="@+id/btn_cockpit_special" android:layout_width="36dp" android:layout_height="36dp" android:layout_marginStart="4dp" android:text="✨" android:background="@drawable/bg_action_button_blue" android:stateListAnimator="@null" />
+                    <Button android:id="@+id/btn_cockpit_edit_frame" android:layout_width="36dp" android:layout_height="36dp" android:layout_marginStart="4dp" android:text="🔧" android:background="@drawable/bg_action_button_blue" android:stateListAnimator="@null" />
+                    <Button android:id="@+id/btn_cockpit_close" android:layout_width="36dp" android:layout_height="36dp" android:layout_marginStart="4dp" android:text="❌" android:background="@drawable/bg_action_button_red" android:stateListAnimator="@null" />
                 </LinearLayout>
             </LinearLayout>
         </LinearLayout>
@@ -202,16 +191,11 @@
             android:layout_height="64dp"
             android:layout_marginTop="12dp"
             android:scrollbars="none">
-            <LinearLayout
-                android:id="@+id/ll_buffer_preview"
-                android:layout_width="wrap_content"
-                android:layout_height="match_parent"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"/>
+            <LinearLayout android:id="@+id/ll_buffer_preview" android:layout_width="wrap_content" android:layout_height="match_parent" android:orientation="horizontal" android:gravity="center_vertical"/>
         </HorizontalScrollView>
     </LinearLayout>
 
-    <!-- 🌌 オーバーレイ：ミニウィンドウ（機能一覧） -->
+    <!-- オーバーレイメニュー（SPECIAL ACTIONS） -->
     <LinearLayout
         android:id="@+id/ll_mini_window"
         android:layout_width="wrap_content"
@@ -222,27 +206,13 @@
         android:padding="16dp"
         android:visibility="gone"
         android:elevation="8dp">
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="SPECIAL ACTIONS"
-            android:textColor="#FF88AA"
-            android:textSize="10sp"
-            android:textStyle="bold"
-            android:layout_gravity="center"
-            android:layout_marginBottom="12dp"/>
-
-        <GridLayout
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:columnCount="2"
-            android:rowCount="3">
-            <Button android:id="@+id/btn_menu_translate" android:layout_width="110dp" android:layout_height="40dp" android:text="🌎 翻訳" android:textSize="12sp" android:layout_margin="4dp" android:background="@drawable/bg_action_button_dark" android:stateListAnimator="@null" android:textColor="#FFFFFF"/>
-            <Button android:id="@+id/btn_menu_guide" android:layout_width="110dp" android:layout_height="40dp" android:text="💡 攻略" android:textSize="12sp" android:layout_margin="4dp" android:background="@drawable/bg_action_button_dark" android:stateListAnimator="@null" android:textColor="#FFFFFF"/>
-            <Button android:id="@+id/btn_menu_status" android:layout_width="110dp" android:layout_height="40dp" android:text="📊 情報" android:textSize="12sp" android:layout_margin="4dp" android:background="@drawable/bg_action_button_dark" android:stateListAnimator="@null" android:textColor="#FFFFFF"/>
-            <Button android:id="@+id/btn_menu_lore" android:layout_width="110dp" android:layout_height="40dp" android:text="📖 解説" android:textSize="12sp" android:layout_margin="4dp" android:background="@drawable/bg_action_button_dark" android:stateListAnimator="@null" android:textColor="#FFFFFF"/>
-            <Button android:id="@+id/btn_menu_trivia" android:layout_width="110dp" android:layout_height="40dp" android:text="🤫 裏話" android:textSize="12sp" android:layout_margin="4dp" android:background="@drawable/bg_action_button_dark" android:stateListAnimator="@null" android:textColor="#FFFFFF"/>
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="SPECIAL ACTIONS" android:textColor="#FF88AA" android:textSize="10sp" android:textStyle="bold" android:layout_gravity="center" android:layout_marginBottom="12dp"/>
+        <GridLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:columnCount="2">
+            <Button android:id="@+id/btn_menu_translate" android:layout_width="110dp" android:layout_height="40dp" android:text="🌎 翻訳" android:textSize="12sp" android:layout_margin="4dp" android:background="@drawable/bg_action_button_dark" android:textColor="#FFFFFF"/>
+            <Button android:id="@+id/btn_menu_guide" android:layout_width="110dp" android:layout_height="40dp" android:text="💡 攻略" android:textSize="12sp" android:layout_margin="4dp" android:background="@drawable/bg_action_button_dark" android:textColor="#FFFFFF"/>
+            <Button android:id="@+id/btn_menu_status" android:layout_width="110dp" android:layout_height="40dp" android:text="📊 情報" android:textSize="12sp" android:layout_margin="4dp" android:background="@drawable/bg_action_button_dark" android:textColor="#FFFFFF"/>
+            <Button android:id="@+id/btn_menu_lore" android:layout_width="110dp" android:layout_height="40dp" android:text="📖 解説" android:textSize="12sp" android:layout_margin="4dp" android:background="@drawable/bg_action_button_dark" android:textColor="#FFFFFF"/>
+            <Button android:id="@+id/btn_menu_trivia" android:layout_width="110dp" android:layout_height="40dp" android:text="🤫 裏話" android:textSize="12sp" android:layout_margin="4dp" android:background="@drawable/bg_action_button_dark" android:textColor="#FFFFFF"/>
         </GridLayout>
     </LinearLayout>
 </FrameLayout>
