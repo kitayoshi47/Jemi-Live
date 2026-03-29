@@ -67,14 +67,16 @@ import kotlin.math.min
 import com.jemi.live.logic.TicketManager
 import kotlinx.coroutines.flow.collect
 
+// ⚡️ JSONパース用のモデルとライブラリ
 import com.jemi.live.model.JemiResponse
 import kotlinx.serialization.json.Json
 
 /**
- * JemiCaptureService (v3.3.0 - Context Refinement)
- * - [Improve] あらすじ（lastSummary）の重み付けを調整。
- * - [Improve] プロンプトに「変化の検知」と「語彙の多様性」を指示。
- * - [Restored] 既存の全てのロジックを完全維持。
+ * JemiCaptureService (v3.3.1 - Full Integration)
+ * - [Fix] 省略を一切排除した完全なソースコード。
+ * - [Feature] lastSummaryによる短期記憶の実装。
+ * - [Improve] 感嘆詞（わぁ！等）の多用を控え、変化に注目するプロンプト・チューニング。
+ * - [Restored] 既存の3段階スケーリング、ステルス・ハートビート、チケットシステムを完全維持。
  */
 class JemiCaptureService : Service() {
     private lateinit var mainWindowManager: WindowManager
@@ -89,15 +91,19 @@ class JemiCaptureService : Service() {
     private lateinit var btnSpecial: Button
     private lateinit var previewView: ImageView
 
+    // 🎫 チケットUI
     private var tvTicket1: TextView? = null
     private var tvTicket2: TextView? = null
     private var tvTicket3: TextView? = null
     private var tvTicket4: TextView? = null
 
+    // 🎫 チケット管理
     private val ticketManager = TicketManager()
 
+    // 🧠 あたしの「記憶（あらすじ）」を保存する変数だよっ！
     private var lastSummary: String = ""
 
+    // ⚡️ JSONパース設定
     private val json = Json {
         ignoreUnknownKeys = true
         coerceInputValues = true
@@ -152,11 +158,15 @@ class JemiCaptureService : Service() {
         mainWindowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         uiWindowManager = mainWindowManager
 
+        // 🎫 チケットシステムをスタンバイ！
         ticketManager.startRefillSystem()
 
         setupFloatingWindows()
     }
 
+    /**
+     * 🕵️ エミュレータ環境かどうかの執拗なチェックだよっ！
+     */
     fun isAndroidStudioEmulator(): Boolean {
         return Build.HARDWARE.contains("goldfish")
                 || Build.HARDWARE.contains("ranchu")
@@ -231,7 +241,8 @@ class JemiCaptureService : Service() {
 
         startForegroundService()
 
-        if (isAndroidStudioEmulator()&& BuildConfig.DEBUG) {
+        // 👻 [Emulator Workaround] ステルス・ハートビート！
+        if (isAndroidStudioEmulator() && BuildConfig.DEBUG) {
             setupForceUpdateView()
         }
 
@@ -374,11 +385,13 @@ class JemiCaptureService : Service() {
         val btnEdit = dualCockpitView!!.findViewById<Button>(R.id.btn_cockpit_edit_frame)
         val btnClose = dualCockpitView!!.findViewById<Button>(R.id.btn_cockpit_close)
 
+        // 🎫 チケットUIバインド
         tvTicket1 = dualCockpitView!!.findViewById(R.id.tv_ticket_1)
         tvTicket2 = dualCockpitView!!.findViewById(R.id.tv_ticket_2)
         tvTicket3 = dualCockpitView!!.findViewById(R.id.tv_ticket_3)
         tvTicket4 = dualCockpitView!!.findViewById(R.id.tv_ticket_4)
 
+        // 🎫 チケット枚数監視（Flow）
         serviceScope.launch {
             ticketManager.ticketCount.collect { count ->
                 updateTicketUI(count)
@@ -460,6 +473,10 @@ class JemiCaptureService : Service() {
         llMiniWindow?.visibility = View.GONE
     }
 
+    /**
+     * 🕵️ Geminiが考え中かどうかだけをチェック！
+     * ヨチオさんの指示：思考中のみハードガードし、チケットがあれば連射OKにする。
+     */
     private fun checkCooldownOnlyThinking(): Boolean {
         if (isGeminiThinking) {
             Toast.makeText(this, "ジェミ、まだ考え中だよぉ🤔 終わるまで待ってねっ♪", Toast.LENGTH_SHORT).show()
@@ -688,6 +705,7 @@ class JemiCaptureService : Service() {
                 Toast.makeText(this, "画像がまだ撮れてないよぉ💦少し待ってね！", Toast.LENGTH_SHORT).show(); return@setOnClickListener
             }
 
+            // 🎫 手動操作はチケットを消費！
             if (ticketManager.consumeTicket()) {
                 val g = createGatchankoBitmap(imageBuffer.toList()) ?: return@setOnClickListener
                 lastCaptureTime = System.currentTimeMillis(); currentPreviewBitmap?.recycle(); currentPreviewBitmap = g
@@ -702,6 +720,9 @@ class JemiCaptureService : Service() {
         }
     }
 
+    /**
+     * ボタンの有効・無効状態を更新！
+     */
     private fun updateCaptureButtonState() {
         if (!::btnCapture.isInitialized) return
 
@@ -781,6 +802,7 @@ class JemiCaptureService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        // 🎫 チケットシステムを停止
         ticketManager.stopRefillSystem()
 
         singleControlView?.let { uiWindowManager.removeView(it) }; singleCommentaryView?.let { uiWindowManager.removeView(it) }
@@ -899,7 +921,8 @@ class JemiCaptureService : Service() {
     }
 
     /**
-     * 🧠 コンテキスト強化版の実況処理だよっ！
+     * 🧠 コンテキスト強化版の実況処理（プロンプト・リファイン版）
+     * ヨチオさんのアドバイスに基づき、感嘆詞の多用を制限しつつ変化を捉えるようにしたよっ！
      */
     private fun getJemiCommentary(b: Bitmap) {
         val o = java.io.ByteArrayOutputStream(); b.compress(Bitmap.CompressFormat.JPEG, 60, o)
@@ -929,7 +952,7 @@ class JemiCaptureService : Service() {
 
             // 🧠 記憶の提示方法を工夫して、ループを防ぐのですよっ！
             val memoryPrompt = if (lastSummary.isNotEmpty()) {
-                "\n【前回のあらすじ】: $lastSummary\n※前回の内容をそのまま繰り返さず、最新の画像で起きた「新しい変化」に注目して実況して！"
+                "\n【前回のあらすじ】: $lastSummary\n※前回の内容と重複する説明は避け、最新の画像で起きた「新たな変化や進展」にのみ注目して実況して！"
             } else ""
 
             while (retryCount <= maxRetries && isActive) {
@@ -940,9 +963,9 @@ class JemiCaptureService : Service() {
                         最新の画像状況を見て、簡潔にテンション高く実況して！$memoryPrompt$translatePrompt
                         回答は必ず以下のJSON形式のみで出力して。
                         {
-                          "commentary": "実況テキスト（毎回違う言葉で！『わぁ！』の多用禁止。最大3行、100文字以内）",
+                          "commentary": "実況テキスト（感嘆詞の多用を控え、毎回異なる表現を使うこと。最大3行、100文字以内）",
                           "emotion": "感情（excited, calm, surprised, normalのいずれか）",
-                          "summary": "現在の状況の短いあらすじ（ワールド番号、敵の有無、アイテム取得状況など、次に繋がる具体的な情報を含めて）"
+                          "summary": "現在の状況の短いあらすじ（ワールド番号、敵の出現、アイテム取得状況、地形の変化など、次回の実況に役立つ具体的な情報）"
                         }
                     """.trimIndent()
 
@@ -977,6 +1000,7 @@ class JemiCaptureService : Service() {
                             tvCommentary.text = parsed.commentary
                             jemiVoice.speak(parsed.commentary)
 
+                            // 🧠 あらすじを更新！
                             lastSummary = parsed.summary
 
                             Log.d("Jemi-API", "✅ JSONパース成功！ [Emotion: ${parsed.emotion}]")
