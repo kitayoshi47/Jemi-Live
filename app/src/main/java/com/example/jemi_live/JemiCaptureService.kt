@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.ServiceInfo
@@ -43,6 +44,7 @@ import androidx.core.content.IntentCompat
 import androidx.core.content.edit
 import androidx.core.graphics.createBitmap
 import androidx.core.view.isVisible
+import com.google.ai.client.generativeai.BuildConfig
 import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.GenerateContentResponse
 import com.google.ai.client.generativeai.type.content
@@ -62,12 +64,16 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
+// ⚡️ 追加：チケット管理とFlow受信用
+import com.jemi.live.logic.TicketManager
+import kotlinx.coroutines.flow.collect
 
 /**
- * JemiCaptureService (v3.2.6 - Stable Expansion without Query)
- * - (Restored) v3.2.3をベースに、ログ出力・リトライ処理・3段階スケーリングを完全維持。
- * - (Feature) ✨ボタンによる拡張アクションメニュー（翻訳、攻略、情報、解説、裏話）を安定稼働。
- * - (Omit) 日本語IMEで競合が発生した「✏️質問機能（Custom Query）」を一旦削除し安定化。
+ * JemiCaptureService (v3.2.8 - Merged Ticket System)
+ * - [Restored] v3.2.6 Stableをベースに、既存の全てのデバッグ・スケーリングロジックを維持。
+ * - [Feature] TicketManagerによるAIコマンド実行チケット管理。
+ * - [Fix] 10秒間の絶対クールタイムを撤廃し、チケットがあれば連射可能にっ🚀
+ * - [Fix] 🤔(Gemini思考中)の時は安全のため割り込みを禁止。
  */
 class JemiCaptureService : Service() {
     private lateinit var mainWindowManager: WindowManager
@@ -79,8 +85,17 @@ class JemiCaptureService : Service() {
     private lateinit var frameParams: WindowManager.LayoutParams
     private lateinit var tvCommentary: TextView
     private lateinit var btnCapture: Button
-    private lateinit var btnSpecial: Button // 追加：✨スペシャルボタン
+    private lateinit var btnSpecial: Button
     private lateinit var previewView: ImageView
+
+    // 🎫 チケットUI用
+    private var tvTicket1: TextView? = null
+    private var tvTicket2: TextView? = null
+    private var tvTicket3: TextView? = null
+    private var tvTicket4: TextView? = null
+
+    // 🎫 チケット管理クラスのインスタンス
+    private val ticketManager = TicketManager()
 
     // --- 拡張UI要素 ---
     private var llMiniWindow: View? = null
@@ -98,7 +113,7 @@ class JemiCaptureService : Service() {
 
     // --- アクション管理フラグ ---
     private var isHighResRequested = false
-    private var pendingActionType = "commentary" // commentary, translate, guide, status, lore, trivia
+    private var pendingActionType = "commentary"
 
     private var isGeminiThinking = false
     private var currentPreviewBitmap: Bitmap? = null
@@ -132,6 +147,10 @@ class JemiCaptureService : Service() {
 
         mainWindowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         uiWindowManager = mainWindowManager
+
+        // 🎫 チケットシステムの稼働を開始
+        ticketManager.startRefillSystem()
+
         setupFloatingWindows()
     }
 
@@ -209,21 +228,17 @@ class JemiCaptureService : Service() {
 
         startForegroundService()
 
-        // デバッグエミュレータ環境では強制的に画面の更新判定を発生させる
         if (isAndroidStudioEmulator()&& BuildConfig.DEBUG) {
-            setupForceUpdateView() // ステルス・ハートビート起動
+            setupForceUpdateView()
         }
 
         handler.postDelayed({ updateCropCache() }, 500)
     }
 
-    /**
-     * 👻 [Emulator Workaround] 1x1ピクセルの透明Viewを動かし続けて、OSに画面更新を強制するのですよっ♪
-     */
     private fun setupForceUpdateView() {
         val forceUpdateView = View(this).apply {
             setBackgroundColor(Color.WHITE)
-            alpha = 0.01f // 目立たないようにほぼ透明っ！
+            alpha = 0.01f
         }
 
         val params = WindowManager.LayoutParams(
@@ -246,7 +261,7 @@ class JemiCaptureService : Service() {
                 while (isActive) {
                     forceUpdateView.rotation = if (toggle) 0f else 1f
                     toggle = !toggle
-                    delay(200) // 0.2秒ごとに鼓動を打つよっ！
+                    delay(200)
                 }
             }
             Log.d("Jemi-Live", "👻 ステルス・ハートビート起動（エミュレータ対策）")
@@ -323,7 +338,6 @@ class JemiCaptureService : Service() {
         previewView = singlePreviewView as ImageView
         previewView.visibility = View.GONE
 
-        // 👇 ここに追加！：プレビュー画像長押しで保存するよっ📸
         previewView.setOnLongClickListener {
             saveGatchankoToFile(currentPreviewBitmap)
             true
@@ -353,11 +367,23 @@ class JemiCaptureService : Service() {
         }
 
         btnCapture = dualCockpitView!!.findViewById(R.id.btn_cockpit_capture)
-        btnSpecial = dualCockpitView!!.findViewById(R.id.btn_cockpit_special) // ✨スペシャルボタン
+        btnSpecial = dualCockpitView!!.findViewById(R.id.btn_cockpit_special)
         val btnEdit = dualCockpitView!!.findViewById<Button>(R.id.btn_cockpit_edit_frame)
         val btnClose = dualCockpitView!!.findViewById<Button>(R.id.btn_cockpit_close)
 
-        // ミニウィンドウの取得のみ残すよっ（質問入力は削除）
+        // 🎫 チケットUIバインド
+        tvTicket1 = dualCockpitView!!.findViewById(R.id.tv_ticket_1)
+        tvTicket2 = dualCockpitView!!.findViewById(R.id.tv_ticket_2)
+        tvTicket3 = dualCockpitView!!.findViewById(R.id.tv_ticket_3)
+        tvTicket4 = dualCockpitView!!.findViewById(R.id.tv_ticket_4)
+
+        // 🎫 チケット枚数監視
+        serviceScope.launch {
+            ticketManager.ticketCount.collect { count ->
+                updateTicketUI(count)
+            }
+        }
+
         llMiniWindow = dualCockpitView!!.findViewById(R.id.ll_mini_window)
 
         setupSpecialMenuListeners()
@@ -391,6 +417,17 @@ class JemiCaptureService : Service() {
     }
 
     /**
+     * 🎫 チケットUIを更新するのですよっ♪
+     */
+    private fun updateTicketUI(count: Int) {
+        val tickets = listOf(tvTicket1, tvTicket2, tvTicket3, tvTicket4)
+        tickets.forEachIndexed { index, textView ->
+            textView?.alpha = if (index < count) 1.0f else 0.2f
+        }
+        updateCaptureButtonState()
+    }
+
+    /**
      * ✨ スペシャルメニューのリスナーを設定するのですよっ♪
      */
     private fun setupSpecialMenuListeners() {
@@ -402,7 +439,6 @@ class JemiCaptureService : Service() {
             }
         }
 
-        // メニュー内ボタン（質問ボタン以外）
         val actions = mapOf(
             R.id.btn_menu_translate to "translate",
             R.id.btn_menu_guide to "guide",
@@ -413,9 +449,15 @@ class JemiCaptureService : Service() {
 
         actions.forEach { (id, type) ->
             dualCockpitView?.findViewById<Button>(id)?.setOnClickListener {
-                if (checkCooldown()) return@setOnClickListener
-                triggerHighResAction(type)
-                closeAllOverlays()
+                // 🤔思考中のみガードするよっ！チケット消費も追加なのですっ
+                if (checkCooldownOnlyThinking()) return@setOnClickListener
+
+                if (ticketManager.consumeTicket()) {
+                    triggerHighResAction(type)
+                    closeAllOverlays()
+                } else {
+                    Toast.makeText(this, "チケットが足りないのですよぉ🔋 回復を待ってねっ！", Toast.LENGTH_SHORT).show()
+                }
             }
         }
     }
@@ -424,9 +466,12 @@ class JemiCaptureService : Service() {
         llMiniWindow?.visibility = View.GONE
     }
 
-    private fun checkCooldown(): Boolean {
-        if (isGeminiThinking || System.currentTimeMillis() - lastCaptureTime < 10000) {
-            Toast.makeText(this, "ジェミ、まだ考え中か休憩中だよぉ🌸", Toast.LENGTH_SHORT).show()
+    /**
+     * 🕵️ [改良] Geminiが考え中かどうかだけをチェックするよっ！
+     */
+    private fun checkCooldownOnlyThinking(): Boolean {
+        if (isGeminiThinking) {
+            Toast.makeText(this, "ジェミ、まだ考え中だよぉ🤔 終わるまで待ってねっ♪", Toast.LENGTH_SHORT).show()
             return true
         }
         return false
@@ -435,7 +480,7 @@ class JemiCaptureService : Service() {
     private fun triggerHighResAction(type: String) {
         pendingActionType = type
         isHighResRequested = true
-        isCaptureRequested = true // setupCaptureをトリガー
+        isCaptureRequested = true
         Log.d("Jemi-Live", "✨ アクション予約: $type (高解像度モード)")
     }
 
@@ -476,25 +521,20 @@ class JemiCaptureService : Service() {
     }
 
     private fun setupCapture() {
-        // 現在のウィンドウのサイズ（幅・高さ）を取得
         val wm = getSystemService(WINDOW_SERVICE) as WindowManager
         val windowMetrics = wm.currentWindowMetrics
         val bounds = windowMetrics.bounds
         val width = bounds.width()
         val height = bounds.height()
-
-        // 画面の密度（DPI）を取得（Resourcesから取得するのが今 2026/03/26 現在の主流）
         val density = resources.configuration.densityDpi
 
-        // ImageReader と VirtualDisplay を作成
-        // ※ width, height, density を直接使う
         imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
 
         virtualDisplay = mediaProjection?.createVirtualDisplay(
             "JemiCapture",
             width,
             height,
-            density, // ここに取得した密度を入れる
+            density,
             DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
             imageReader?.surface,
             null,
@@ -508,7 +548,6 @@ class JemiCaptureService : Service() {
             if (!isCaptureRequested) { image.close(); return@setOnImageAvailableListener }
             isCaptureRequested = false
 
-            // アクション情報をコピーしてリセット
             val isHighRes = isHighResRequested
             val currentAction = pendingActionType
             isHighResRequested = false
@@ -524,15 +563,13 @@ class JemiCaptureService : Service() {
                     fullBitmap.copyPixelsFromBuffer(plane.buffer)
                     if (captureAreaMode == "manual") updateCropCache()
 
-                    // クロップ指定
                     val cropX = max(0, cachedCropRect.left)
                     val cropY = max(0, cachedCropRect.top)
                     val cropW = min(fullBitmap.width - cropX, cachedCropRect.width())
                     val cropH = min(fullBitmap.height - cropY, cachedCropRect.height())
 
-                    // カットエリア
-                    val cutRateW = 5 // 画面左右をカットする割合(%)
-                    val cutRateH = 5 // 画面上下をカットする割合(%)
+                    val cutRateW = 5
+                    val cutRateH = 5
                     val cutX = cropW / 100 * cutRateW / 2
                     val cutY = cropH / 100 * cutRateH / 2
 
@@ -544,7 +581,6 @@ class JemiCaptureService : Service() {
                             cropW - (cutX * 2),
                             cropH - (cutY * 2))
 
-                        // --- [✨拡張ボタン対応：ターゲットサイズの決定] ---
                         val targetTileW = if (isHighRes) 512 else 256
                         val targetTileH = if (isHighRes) {
                             if (captureAreaMode == "16_9") 288 else 384
@@ -552,15 +588,12 @@ class JemiCaptureService : Service() {
                             if (captureAreaMode == "16_9") 144 else 170
                         }
 
-                        // --- [3段階リサイズ 高品質バイキュービック補間] ---
-                        // 高品質Paintの設定
                         val highQualityPaint = Paint().apply {
                             isFilterBitmap = true
                             isAntiAlias = true
                             isDither = true
                         }
 
-                        // --- ステップ1: 中間サイズ（1/2）への縮小 ---
                         val midWidth = cropped.width / 2
                         val midHeight = cropped.height / 2
                         val midBitmap = createBitmap(midWidth, midHeight)
@@ -569,7 +602,6 @@ class JemiCaptureService : Service() {
                             drawBitmap(cropped, matrix, highQualityPaint)
                         }
 
-                        // --- ステップ2: 中間サイズ（1/4）への縮小 ---
                         val midWidthHalf = midWidth / 2
                         val midHeightHalf = midHeight / 2
                         val midBitmapHalf = createBitmap(midWidthHalf, midHeightHalf)
@@ -578,7 +610,6 @@ class JemiCaptureService : Service() {
                             drawBitmap(midBitmap, matrix, highQualityPaint)
                         }
 
-                        // --- ステップ3: 最終ターゲットサイズへの縮小 ---
                         val scaled = createBitmap(targetTileW, targetTileH)
                         Canvas(scaled).apply {
                             val scaleX = targetTileW.toFloat() / midWidthHalf
@@ -587,19 +618,14 @@ class JemiCaptureService : Service() {
                             drawBitmap(midBitmapHalf, matrix, highQualityPaint)
                         }
 
-                        // 中間ビットマップはもう不要なのでメモリ解放
                         midBitmap.recycle()
                         midBitmapHalf.recycle()
 
-                        // RGB_565への変換
                         val finalBmp = scaled.copy(Bitmap.Config.RGB_565, false)
                         if (scaled != finalBmp) scaled.recycle()
-                        // -----------------------------------------------------------
-
                         cropped.recycle()
 
                         if (isHighRes) {
-                            // ✨ スペシャルアクション（高解像度）の処理へ飛ばすよっ！
                             handler.post {
                                 lastCaptureTime = System.currentTimeMillis()
                                 currentPreviewBitmap?.recycle()
@@ -609,7 +635,6 @@ class JemiCaptureService : Service() {
                                 dispatchSpecialAction(finalBmp, currentAction)
                             }
                         } else {
-                            // 通常の実況バッファ追加
                             synchronized(imageBuffer) {
                                 imageBuffer.add(finalBmp)
                                 if (imageBuffer.size > maxBufferSize) {
@@ -666,15 +691,21 @@ class JemiCaptureService : Service() {
 
     private fun setupButtonActions(btnClose: Button) {
         btnCapture.setOnClickListener {
-            if (isGeminiThinking || System.currentTimeMillis() - lastCaptureTime < 10000) {
-                Toast.makeText(this, "ジェミ、まだ考え中か休憩中だよぉ🌸", Toast.LENGTH_SHORT).show(); return@setOnClickListener
-            }
+            // 🤔中のみチェック！⌛️（10秒待機）の判定はチケット制により削除されたのですよっ！
+            if (checkCooldownOnlyThinking()) return@setOnClickListener
+
             if (imageBuffer.isEmpty()) {
                 Toast.makeText(this, "画像がまだ撮れてないよぉ💦少し待ってね！", Toast.LENGTH_SHORT).show(); return@setOnClickListener
             }
-            val g = createGatchankoBitmap(imageBuffer.toList()) ?: return@setOnClickListener
-            lastCaptureTime = System.currentTimeMillis(); currentPreviewBitmap?.recycle(); currentPreviewBitmap = g
-            previewView.setImageBitmap(g); updateCaptureButtonState(); getJemiCommentary(g)
+
+            // 🎫 手動キャプチャはチケットを消費するよっ
+            if (ticketManager.consumeTicket()) {
+                val g = createGatchankoBitmap(imageBuffer.toList()) ?: return@setOnClickListener
+                lastCaptureTime = System.currentTimeMillis(); currentPreviewBitmap?.recycle(); currentPreviewBitmap = g
+                previewView.setImageBitmap(g); updateCaptureButtonState(); getJemiCommentary(g)
+            } else {
+                Toast.makeText(this, "チケットが足りないのですよぉ🔋 回復を待ってねっ！", Toast.LENGTH_SHORT).show()
+            }
         }
         btnClose.setOnClickListener {
             startActivity(Intent(this, MainActivity::class.java).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT) })
@@ -682,15 +713,19 @@ class JemiCaptureService : Service() {
         }
     }
 
+    /**
+     * 🕵️ [改良] ボタンの見た目制御からも⌛️判定を削除して、チケット依存に変更したよっ！
+     */
     private fun updateCaptureButtonState() {
         if (!::btnCapture.isInitialized) return
-        val t = System.currentTimeMillis() - lastCaptureTime
-        val cooling = t < 10000
-        val isEnabled = !isGeminiThinking && !cooling
+
+        val hasTicket = ticketManager.ticketCount.value > 0
+        // 🤔が最優先のハードブロック。チケットがあれば連打可能っ！
+        val isEnabled = !isGeminiThinking && hasTicket
 
         val buttonText = when {
             isGeminiThinking -> "🤔"
-            cooling -> "⌛️"
+            !hasTicket -> "🪫"
             else -> null
         }
 
@@ -701,8 +736,6 @@ class JemiCaptureService : Service() {
         btnSpecial.isEnabled = isEnabled
         btnSpecial.text = buttonText ?: "✨"
         btnSpecial.alpha = if (isEnabled) 1.0f else 0.5f
-
-        if (cooling && !isGeminiThinking) handler.postDelayed({ updateCaptureButtonState() }, 10000 - t + 50)
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -763,6 +796,9 @@ class JemiCaptureService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        // 🎫 チケットシステムの停止
+        ticketManager.stopRefillSystem()
+
         singleControlView?.let { uiWindowManager.removeView(it) }; singleCommentaryView?.let { uiWindowManager.removeView(it) }
         singlePreviewView?.let { uiWindowManager.removeView(it) }; dualCockpitView?.let { uiWindowManager.removeView(it) }
         if (::recognitionFrameView.isInitialized) mainWindowManager.removeView(recognitionFrameView)
@@ -791,7 +827,6 @@ class JemiCaptureService : Service() {
             val imageFile = File(storageDir, fileName)
             val outputStream = FileOutputStream(imageFile)
 
-            // JPEG圧縮率
             bitmap.compress(Bitmap.CompressFormat.JPEG, 60, outputStream)
             outputStream.flush()
             outputStream.close()
@@ -808,9 +843,6 @@ class JemiCaptureService : Service() {
         }
     }
 
-    /**
-     * ✨ 拡張アクションの統合レスポンスメソッド（質問機能なし版）
-     */
     private fun getJemiSpecialResponse(b: Bitmap, type: String) {
         val o = java.io.ByteArrayOutputStream(); b.compress(Bitmap.CompressFormat.JPEG, 80, o)
         val j = o.toByteArray()
@@ -839,7 +871,6 @@ class JemiCaptureService : Service() {
             var response: GenerateContentResponse? = null
             var lastError: Exception? = null
 
-            // --- リトライループ開始だよっ！ ---
             while (retryCount <= maxRetries && isActive) {
                 try {
                     val prompt = when(type) {
@@ -851,17 +882,16 @@ class JemiCaptureService : Service() {
                         else -> ""
                     }
                     response = model.generateContent(content { blob("image/jpeg", j); text(prompt) })
-                    break // 成功したらループを抜けるのですよっ♪
+                    break
 
                 } catch (e: Exception) {
                     lastError = e
-                    // 503エラーや一時的なエラーの場合のみリトライするねっ
                     if (retryCount < maxRetries) {
                         delay(delayMs)
-                        delayMs *= 2 // 1s, 2s, 4s, 8s, 16s と待ち時間を倍にするよっ
+                        delayMs *= 2
                         retryCount++
                     } else {
-                        break // 最大回数に達したら諦めるのですよ……
+                        break
                     }
                 }
             }
@@ -884,11 +914,6 @@ class JemiCaptureService : Service() {
         }
     }
 
-    /**
-     * [Main Architect Update: v3.0.4 継承]
-     * 指数バックオフ（Exponential Backoff）によるリトライ機能を実装したのですよっ♪
-     * 503エラー（サーバー過負荷）時に自動で再試行します。
-     */
     private fun getJemiCommentary(b: Bitmap) {
         val o = java.io.ByteArrayOutputStream(); b.compress(Bitmap.CompressFormat.JPEG, 60, o)
         val j = o.toByteArray()
@@ -915,24 +940,22 @@ class JemiCaptureService : Service() {
             var response: GenerateContentResponse? = null
             var lastError: Exception? = null
 
-            // --- リトライループ開始だよっ！ ---
             while (retryCount <= maxRetries && isActive) {
                 try {
                     val translatePrompt = if (isTranslationEnabled) "\n【重要】日本語実況のすぐ後に、内容を英語に翻訳した一文も付け加えて！" else ""
                     val p = "最新の画像状況を見て、簡潔にテンション高く実況して！$translatePrompt\n【ルール】最大3行、100文字以内！画像は2x3タイルの時系列だよ。"
 
                     response = model.generateContent(content { blob("image/jpeg", j); text(p) })
-                    break // 成功したらループを抜けるのですよっ♪
+                    break
 
                 } catch (e: Exception) {
                     lastError = e
-                    // 503エラーや一時的なエラーの場合のみリトライするねっ
                     if (retryCount < maxRetries) {
                         delay(delayMs)
-                        delayMs *= 2 // 1s, 2s, 4s, 8s, 16s と待ち時間を倍にするよっ
+                        delayMs *= 2
                         retryCount++
                     } else {
-                        break // 最大回数に達したら諦めるのですよ……
+                        break
                     }
                 }
             }

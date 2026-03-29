@@ -65,13 +65,58 @@
                 </ScrollView>
             </LinearLayout>
 
-            <!-- 🎛️ 右側：コントロールパネル -->
+            <!-- 🎛️ 右側：コントロールパネル（160dp固定推奨エリア） -->
             <LinearLayout
-                android:layout_width="wrap_content"
+                android:layout_width="160dp"
                 android:layout_height="match_parent"
                 android:orientation="vertical"
                 android:layout_marginStart="12dp"
-                android:gravity="center">
+                android:gravity="top|center_horizontal">
+
+                <!-- 🔋 チケット表示エリア（新規追加！） -->
+                <LinearLayout
+                    android:id="@+id/ll_cockpit_tickets"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center"
+                    android:background="#333333"
+                    android:padding="4dp"
+                    android:layout_marginBottom="8dp">
+
+                    <TextView
+                        android:id="@+id/tv_ticket_1"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="🔋"
+                        android:textSize="18sp"
+                        android:alpha="1.0"
+                        android:layout_margin="2dp"/>
+                    <TextView
+                        android:id="@+id/tv_ticket_2"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="🔋"
+                        android:textSize="18sp"
+                        android:alpha="1.0"
+                        android:layout_margin="2dp"/>
+                    <TextView
+                        android:id="@+id/tv_ticket_3"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="🔋"
+                        android:textSize="18sp"
+                        android:alpha="1.0"
+                        android:layout_margin="2dp"/>
+                    <TextView
+                        android:id="@+id/tv_ticket_4"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="🔋"
+                        android:textSize="18sp"
+                        android:alpha="1.0"
+                        android:layout_margin="2dp"/>
+                </LinearLayout>
 
                 <ImageView
                     android:id="@+id/iv_cockpit_preview"
