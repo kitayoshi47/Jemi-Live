@@ -64,16 +64,17 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
-// ⚡️ 追加：チケット管理とFlow受信用
 import com.jemi.live.logic.TicketManager
 import kotlinx.coroutines.flow.collect
 
+import com.jemi.live.model.JemiResponse
+import kotlinx.serialization.json.Json
+
 /**
- * JemiCaptureService (v3.2.8 - Merged Ticket System)
- * - [Restored] v3.2.6 Stableをベースに、既存の全てのデバッグ・スケーリングロジックを維持。
- * - [Feature] TicketManagerによるAIコマンド実行チケット管理。
- * - [Fix] 10秒間の絶対クールタイムを撤廃し、チケットがあれば連射可能にっ🚀
- * - [Fix] 🤔(Gemini思考中)の時は安全のため割り込みを禁止。
+ * JemiCaptureService (v3.3.0 - Context Refinement)
+ * - [Improve] あらすじ（lastSummary）の重み付けを調整。
+ * - [Improve] プロンプトに「変化の検知」と「語彙の多様性」を指示。
+ * - [Restored] 既存の全てのロジックを完全維持。
  */
 class JemiCaptureService : Service() {
     private lateinit var mainWindowManager: WindowManager
@@ -88,16 +89,20 @@ class JemiCaptureService : Service() {
     private lateinit var btnSpecial: Button
     private lateinit var previewView: ImageView
 
-    // 🎫 チケットUI用
     private var tvTicket1: TextView? = null
     private var tvTicket2: TextView? = null
     private var tvTicket3: TextView? = null
     private var tvTicket4: TextView? = null
 
-    // 🎫 チケット管理クラスのインスタンス
     private val ticketManager = TicketManager()
 
-    // --- 拡張UI要素 ---
+    private var lastSummary: String = ""
+
+    private val json = Json {
+        ignoreUnknownKeys = true
+        coerceInputValues = true
+    }
+
     private var llMiniWindow: View? = null
 
     private var singleControlView: View? = null
@@ -111,7 +116,6 @@ class JemiCaptureService : Service() {
     private var imageReader: ImageReader? = null
     private var isCaptureRequested = false
 
-    // --- アクション管理フラグ ---
     private var isHighResRequested = false
     private var pendingActionType = "commentary"
 
@@ -148,7 +152,6 @@ class JemiCaptureService : Service() {
         mainWindowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         uiWindowManager = mainWindowManager
 
-        // 🎫 チケットシステムの稼働を開始
         ticketManager.startRefillSystem()
 
         setupFloatingWindows()
@@ -371,13 +374,11 @@ class JemiCaptureService : Service() {
         val btnEdit = dualCockpitView!!.findViewById<Button>(R.id.btn_cockpit_edit_frame)
         val btnClose = dualCockpitView!!.findViewById<Button>(R.id.btn_cockpit_close)
 
-        // 🎫 チケットUIバインド
         tvTicket1 = dualCockpitView!!.findViewById(R.id.tv_ticket_1)
         tvTicket2 = dualCockpitView!!.findViewById(R.id.tv_ticket_2)
         tvTicket3 = dualCockpitView!!.findViewById(R.id.tv_ticket_3)
         tvTicket4 = dualCockpitView!!.findViewById(R.id.tv_ticket_4)
 
-        // 🎫 チケット枚数監視
         serviceScope.launch {
             ticketManager.ticketCount.collect { count ->
                 updateTicketUI(count)
@@ -416,9 +417,6 @@ class JemiCaptureService : Service() {
         uiWindowManager.addView(dualCockpitView, cockpitParams)
     }
 
-    /**
-     * 🎫 チケットUIを更新するのですよっ♪
-     */
     private fun updateTicketUI(count: Int) {
         val tickets = listOf(tvTicket1, tvTicket2, tvTicket3, tvTicket4)
         tickets.forEachIndexed { index, textView ->
@@ -427,9 +425,6 @@ class JemiCaptureService : Service() {
         updateCaptureButtonState()
     }
 
-    /**
-     * ✨ スペシャルメニューのリスナーを設定するのですよっ♪
-     */
     private fun setupSpecialMenuListeners() {
         btnSpecial.setOnClickListener {
             if (llMiniWindow?.visibility == View.VISIBLE) {
@@ -449,7 +444,6 @@ class JemiCaptureService : Service() {
 
         actions.forEach { (id, type) ->
             dualCockpitView?.findViewById<Button>(id)?.setOnClickListener {
-                // 🤔思考中のみガードするよっ！チケット消費も追加なのですっ
                 if (checkCooldownOnlyThinking()) return@setOnClickListener
 
                 if (ticketManager.consumeTicket()) {
@@ -466,9 +460,6 @@ class JemiCaptureService : Service() {
         llMiniWindow?.visibility = View.GONE
     }
 
-    /**
-     * 🕵️ [改良] Geminiが考え中かどうかだけをチェックするよっ！
-     */
     private fun checkCooldownOnlyThinking(): Boolean {
         if (isGeminiThinking) {
             Toast.makeText(this, "ジェミ、まだ考え中だよぉ🤔 終わるまで待ってねっ♪", Toast.LENGTH_SHORT).show()
@@ -691,14 +682,12 @@ class JemiCaptureService : Service() {
 
     private fun setupButtonActions(btnClose: Button) {
         btnCapture.setOnClickListener {
-            // 🤔中のみチェック！⌛️（10秒待機）の判定はチケット制により削除されたのですよっ！
             if (checkCooldownOnlyThinking()) return@setOnClickListener
 
             if (imageBuffer.isEmpty()) {
                 Toast.makeText(this, "画像がまだ撮れてないよぉ💦少し待ってね！", Toast.LENGTH_SHORT).show(); return@setOnClickListener
             }
 
-            // 🎫 手動キャプチャはチケットを消費するよっ
             if (ticketManager.consumeTicket()) {
                 val g = createGatchankoBitmap(imageBuffer.toList()) ?: return@setOnClickListener
                 lastCaptureTime = System.currentTimeMillis(); currentPreviewBitmap?.recycle(); currentPreviewBitmap = g
@@ -713,14 +702,10 @@ class JemiCaptureService : Service() {
         }
     }
 
-    /**
-     * 🕵️ [改良] ボタンの見た目制御からも⌛️判定を削除して、チケット依存に変更したよっ！
-     */
     private fun updateCaptureButtonState() {
         if (!::btnCapture.isInitialized) return
 
         val hasTicket = ticketManager.ticketCount.value > 0
-        // 🤔が最優先のハードブロック。チケットがあれば連打可能っ！
         val isEnabled = !isGeminiThinking && hasTicket
 
         val buttonText = when {
@@ -796,7 +781,6 @@ class JemiCaptureService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        // 🎫 チケットシステムの停止
         ticketManager.stopRefillSystem()
 
         singleControlView?.let { uiWindowManager.removeView(it) }; singleCommentaryView?.let { uiWindowManager.removeView(it) }
@@ -914,6 +898,9 @@ class JemiCaptureService : Service() {
         }
     }
 
+    /**
+     * 🧠 コンテキスト強化版の実況処理だよっ！
+     */
     private fun getJemiCommentary(b: Bitmap) {
         val o = java.io.ByteArrayOutputStream(); b.compress(Bitmap.CompressFormat.JPEG, 60, o)
         val j = o.toByteArray()
@@ -922,7 +909,7 @@ class JemiCaptureService : Service() {
         isGeminiThinking = true
         updateCaptureButtonState()
         val startTime = System.currentTimeMillis()
-        Log.d("Jemi-API", "🚀 Gemini API 送信開始...")
+        Log.d("Jemi-API", "🚀 Gemini API 送信開始（Context Refinement Mode）...")
 
         if (isDebugMode) {
             val d = if (isTranslationEnabled) "デバッグモード中だよっ！翻訳モードもオンだねっ！ (DEBUG & TRANSLATE OK!)" else "ヨチオさん、デバッグモードでの動作確認中だよっ🌸"
@@ -940,10 +927,24 @@ class JemiCaptureService : Service() {
             var response: GenerateContentResponse? = null
             var lastError: Exception? = null
 
+            // 🧠 記憶の提示方法を工夫して、ループを防ぐのですよっ！
+            val memoryPrompt = if (lastSummary.isNotEmpty()) {
+                "\n【前回のあらすじ】: $lastSummary\n※前回の内容をそのまま繰り返さず、最新の画像で起きた「新しい変化」に注目して実況して！"
+            } else ""
+
             while (retryCount <= maxRetries && isActive) {
                 try {
                     val translatePrompt = if (isTranslationEnabled) "\n【重要】日本語実況のすぐ後に、内容を英語に翻訳した一文も付け加えて！" else ""
-                    val p = "最新の画像状況を見て、簡潔にテンション高く実況して！$translatePrompt\n【ルール】最大3行、100文字以内！画像は2x3タイルの時系列だよ。"
+
+                    val p = """
+                        最新の画像状況を見て、簡潔にテンション高く実況して！$memoryPrompt$translatePrompt
+                        回答は必ず以下のJSON形式のみで出力して。
+                        {
+                          "commentary": "実況テキスト（毎回違う言葉で！『わぁ！』の多用禁止。最大3行、100文字以内）",
+                          "emotion": "感情（excited, calm, surprised, normalのいずれか）",
+                          "summary": "現在の状況の短いあらすじ（ワールド番号、敵の有無、アイテム取得状況など、次に繋がる具体的な情報を含めて）"
+                        }
+                    """.trimIndent()
 
                     response = model.generateContent(content { blob("image/jpeg", j); text(p) })
                     break
@@ -962,11 +963,35 @@ class JemiCaptureService : Service() {
 
             withContext(Dispatchers.Main) {
                 if (response != null) {
-                    val rep = response.text ?: "読み取れなかったみたい💦"
+                    val rawText = response.text ?: ""
                     val latency = System.currentTimeMillis() - startTime
-                    tvCommentary.text = rep; jemiVoice.speak(rep)
+
+                    try {
+                        val jsonStart = rawText.indexOf("{")
+                        val jsonEnd = rawText.lastIndexOf("}")
+
+                        if (jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart) {
+                            val jsonStr = rawText.substring(jsonStart, jsonEnd + 1)
+                            val parsed = json.decodeFromString<JemiResponse>(jsonStr)
+
+                            tvCommentary.text = parsed.commentary
+                            jemiVoice.speak(parsed.commentary)
+
+                            lastSummary = parsed.summary
+
+                            Log.d("Jemi-API", "✅ JSONパース成功！ [Emotion: ${parsed.emotion}]")
+                            Log.d("Jemi-Memory", "💾 新しいあらすじを更新したよ：$lastSummary")
+                        } else {
+                            tvCommentary.text = rawText
+                            jemiVoice.speak(rawText)
+                        }
+                    } catch (e: Exception) {
+                        tvCommentary.text = rawText
+                        jemiVoice.speak(rawText)
+                        Log.e("Jemi-API", "❌ JSONパース失敗", e)
+                    }
+
                     Log.d("Jemi-API", "✅ Gemini API 受信成功！ [応答時間: ${latency}ms, リトライ: ${retryCount}回]")
-                    Log.d("Jemi-Live", "🎤 実況: $rep")
                 } else {
                     Log.e("Jemi-API", "❌ Gemini API 通信エラー (最終試行失敗)", lastError)
                     Toast.makeText(this@JemiCaptureService, "サーバーが混んでるみたい💦後でもう一度試してね！", Toast.LENGTH_SHORT).show()
