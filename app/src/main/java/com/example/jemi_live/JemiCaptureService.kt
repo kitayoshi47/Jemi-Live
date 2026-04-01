@@ -4,7 +4,6 @@ import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
-import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.ServiceInfo
@@ -25,7 +24,7 @@ import android.os.Environment
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
-import android.util.DisplayMetrics
+import android.provider.Settings
 import android.util.Log
 import android.view.Display
 import android.view.Gravity
@@ -46,11 +45,11 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.IntentCompat
 import androidx.core.content.edit
 import androidx.core.graphics.createBitmap
-import androidx.core.view.isVisible
-import com.google.ai.client.generativeai.BuildConfig
 import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.GenerateContentResponse
 import com.google.ai.client.generativeai.type.content
+import com.jemi.live.logic.TicketManager
+import com.jemi.live.model.JemiResponse
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -60,6 +59,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
@@ -67,17 +67,14 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
-import com.jemi.live.logic.TicketManager
-import kotlinx.coroutines.flow.collect
-import com.jemi.live.model.JemiResponse
-import kotlinx.serialization.json.Json
+import androidx.core.view.isVisible
 
 /**
  * JemiCaptureService (v3.4.2 - Final Integration)
- * - [Feature] Liveモード(自動実況)を搭載。タイマーとProgressBarによる制御。
- * - [Feature] JSONパースによるあらすじ記憶(lastSummary)を完全維持。
- * - [Feature] TicketManagerによるAIリソース管理。
- * - [Restored] オリジナルのログ出力、DisplayMetrics、スケーリングロジックを完全維持。
+ * - (Feature) Liveモード(自動実況)を搭載。タイマーとProgressBarによる制御。
+ * - (Feature) JSONパースによるあらすじ記憶(lastSummary)を完全維持。
+ * - (Feature) TicketManagerによるAIリソース管理。
+ * - (Restored) オリジナルのログ出力、DisplayMetrics、スケーリングロジックを完全維持。
  */
 class JemiCaptureService : Service() {
     private lateinit var mainWindowManager: WindowManager
@@ -162,29 +159,20 @@ class JemiCaptureService : Service() {
         mainWindowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         uiWindowManager = mainWindowManager
 
-        // 🎫 チケットシステムの起動
-        ticketManager.startRefillSystem()
-
+        ticketManager.startRefillSystem()   // 🎫 チケットシステムの起動
         setupFloatingWindows()
-        // 🛰️ LIVEモード監視タイマーを起動
-        startLiveModeTimer()
+        startLiveModeTimer()                // 🛰️ LIVEモード監視タイマーを起動
     }
 
-    /**
-     * 🕵️ エミュレータ環境かどうかの執拗なチェックだよっ！
-     */
-    fun isAndroidStudioEmulator(): Boolean {
-        return Build.HARDWARE.contains("goldfish")
-                || Build.HARDWARE.contains("ranchu")
-                || Build.MODEL.contains("google_sdk")
-                || Build.MODEL.contains("Emulator")
-                || Build.MODEL.contains("Android SDK built for x86")
-                || Build.PRODUCT.contains("sdk_gphone")
-                || Build.PRODUCT.contains("google_sdk")
-                || Build.PRODUCT.contains("sdk")
-    }
-
+    @SuppressLint("ObsoleteSdkInt")
     private fun setupFloatingWindows() {
+        // 権限を最終チェック
+        if (!Settings.canDrawOverlays(this)) {
+            Log.e("Jemi-Live", "❌ オーバーレイ権限がないため、ウィンドウを追加できません。")
+            stopSelf()
+            return
+        }
+
         isSingleMode = prefs.getBoolean("is_single_display_mode", false)
         val areaId = prefs.getInt("last_capture_area_id", R.id.rb_area_manual)
         captureAreaMode = when(areaId) {
@@ -192,6 +180,15 @@ class JemiCaptureService : Service() {
             R.id.rb_area_16_9 -> "16_9"
             else -> "manual"
         }
+
+        // mainWindowManager を適切な Context から取得（Android 11+ 対応）
+        mainWindowManager = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val windowContext = createWindowContext(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, null)
+            windowContext.getSystemService(WINDOW_SERVICE) as WindowManager
+        } else {
+            getSystemService(WINDOW_SERVICE) as WindowManager
+        }
+        uiWindowManager = mainWindowManager
 
         if (!isSingleMode) {
             val displayManager = getSystemService(DISPLAY_SERVICE) as DisplayManager
@@ -219,7 +216,11 @@ class JemiCaptureService : Service() {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
             PixelFormat.TRANSLUCENT
-        ).apply { gravity = Gravity.TOP or Gravity.START; x = prefs.getInt("frame_x", 0); y = prefs.getInt("frame_y", 0) }
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = prefs.getInt("frame_x", 0)
+            y = prefs.getInt("frame_y", 0)
+        }
 
         recognitionFrameView = FrameLayout(this).apply {
             setBackgroundColor(Color.TRANSPARENT)
@@ -235,7 +236,16 @@ class JemiCaptureService : Service() {
                 setBackgroundColor(Color.GREEN); alpha = initialAlpha
             })
         }
-        mainWindowManager.addView(recognitionFrameView, frameParams)
+
+        // 例外処理を加えて View を追加！
+        try {
+            mainWindowManager.addView(recognitionFrameView, frameParams)
+        } catch (e: WindowManager.BadTokenException) {
+            Log.e("Jemi-Live", "❌ BadTokenException: 権限不足かトークンが無効です。", e)
+            Toast.makeText(this, "オーバーレイ表示に失敗しました。権限を確認してください。", Toast.LENGTH_LONG).show()
+            stopSelf()
+            return
+        }
 
         if (captureAreaMode != "manual") calculateAutoCropRect(screenW, screenH)
 
@@ -247,8 +257,8 @@ class JemiCaptureService : Service() {
 
         startForegroundService()
 
-        // 👻 [Emulator Workaround] ステルス・ハートビート！
-        if (isAndroidStudioEmulator() && BuildConfig.DEBUG) {
+        // ステルス・ハートビート
+        if (isAndroidStudioEmulator()) {
             setupForceUpdateView()
         }
 
@@ -347,7 +357,7 @@ class JemiCaptureService : Service() {
         btnEdit.setOnClickListener { toggleFrameAdjustMode() }
         btnTogglePreview?.setOnClickListener {
             if (singlePreviewView != null) {
-                singlePreviewView!!.visibility = if (singlePreviewView!!.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+                singlePreviewView!!.visibility = if (singlePreviewView!!.isVisible) View.GONE else View.VISIBLE
             }
         }
         setupButtonActions(btnClose)
@@ -374,7 +384,7 @@ class JemiCaptureService : Service() {
         setupDraggable(singleCommentaryView!!, commParams, uiWindowManager, iT=true, iB=false, iL=false) { saveCoords("comm", commParams) }
     }
 
-    @SuppressLint("InflateParams", "DefaultLocale")
+    @SuppressLint("InflateParams", "DefaultLocale", "SetTextI18n")
     private fun setupDualModeCockpitUI() {
         val cockpitParams = WindowManager.LayoutParams(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT).apply { gravity = Gravity.CENTER }
         dualCockpitView = LayoutInflater.from(this).inflate(R.layout.layout_cockpit_dashboard, null)
@@ -424,7 +434,7 @@ class JemiCaptureService : Service() {
             }
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {
-                prefs.edit().putInt("live_interval_sec", liveIntervalSec).apply()
+                prefs.edit { putInt("live_interval_sec", liveIntervalSec) }
                 resetLiveCountdown()
             }
         })
